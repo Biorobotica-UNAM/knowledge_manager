@@ -16,38 +16,19 @@ WorldStateNode::WorldStateNode() : Node("world_state_node") {
 }
 
 WorldState WorldStateNode::build_initial_state() {
-  // --- Paths ---
-  std::string bank_path =
-      ament_index_cpp::get_package_share_directory("knowledge_bank");
-
-  std::string keys_path = bank_path + "/keys/";
-  std::string volatile_path = bank_path + "/volatile/";
-
-  std::string locations_path = keys_path + "locations.yaml";
-  std::string objects_path = keys_path + "objects.yaml";
-  std::string people_path = keys_path + "people.yaml";
-  std::string world_path = keys_path + "world.yaml";
-  std::string output_path = volatile_path + "runtime.yaml";
-
-  // --- Load references ---
-  auto locations_ref = LocationsLoader(locations_path).build();
-  auto objects_ref = DefaultLoader(objects_path).build();
-  auto people_ref = DefaultLoader(people_path).build();
-
-  RCLCPP_INFO(
-      this->get_logger(),
-      "Referencies loaded: %zu locations, %zu objects, %zu people descriptions",
-      locations_ref.size(), objects_ref.size(), people_ref.size());
+  build_paths();
+  build_references();
 
   // --- Build initial state ---
-  WorldLoader world_loader(world_path, locations_ref, objects_ref, people_ref);
+  WorldLoader world_loader(world_path_, locations_ref_, objects_ref_,
+                           people_ref_);
   WorldState state = world_loader.build();
 
   RCLCPP_INFO(this->get_logger(),
               "World state built. Robot at: %s, holding: %s",
               state.robot.location.c_str(), state.robot.holding.c_str());
 
-  save_state(state, output_path);
+  save_state(state, output_path_);
 
   return state;
 }
@@ -124,4 +105,28 @@ void WorldStateNode::save_state(const WorldState &state,
   fout << out.c_str();
   RCLCPP_INFO(this->get_logger(), "Runtime state saved to: %s",
               output_path.c_str());
+}
+
+void WorldStateNode::build_paths() {
+  bank_path_ = ament_index_cpp::get_package_share_directory("knowledge_bank");
+
+  keys_path_ = bank_path_ + "/keys/";
+  volatile_path_ = bank_path_ + "/volatile/";
+
+  locations_path_ = keys_path_ + "locations.yaml";
+  objects_path_ = keys_path_ + "objects.yaml";
+  people_path_ = keys_path_ + "people.yaml";
+  world_path_ = keys_path_ + "world.yaml";
+  output_path_ = volatile_path_ + "runtime.yaml";
+}
+
+void WorldStateNode::build_references() {
+  locations_ref_ = LocationsLoader(locations_path_).build();
+  objects_ref_ = DefaultLoader(objects_path_).build();
+  people_ref_ = DefaultLoader(people_path_).build();
+
+  RCLCPP_INFO(
+      this->get_logger(),
+      "Referencies loaded: %zu locations, %zu objects, %zu people descriptions",
+      locations_ref_.size(), objects_ref_.size(), people_ref_.size());
 }
