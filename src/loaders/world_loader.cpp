@@ -1,4 +1,6 @@
 #include "loaders/world_loader.hpp"
+#include <algorithm>
+#include <yaml-cpp/yaml.h>
 
 WorldLoader::WorldLoader(const std::string &world_path,
                          const std::vector<std::string> &locations_ref,
@@ -68,7 +70,7 @@ WorldState WorldLoader::build() {
         }
         ObjectDescription object{};
         object.name = object_name;
-        object.location = locations;
+        object.locations = locations;
 
         state.objects.push_back(object);
       }

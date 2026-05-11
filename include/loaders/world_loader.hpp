@@ -1,9 +1,7 @@
 #pragma once
 
-#include <algorithm>
 #include <string>
 #include <vector>
-#include <yaml-cpp/yaml.h>
 
 struct RobotDescription {
   std::string name{};
@@ -13,7 +11,7 @@ struct RobotDescription {
 
 struct ObjectDescription {
   std::string name{};
-  std::vector<std::string> location{};
+  std::vector<std::string> locations{};
 };
 
 struct PersonDescription {

@@ -10,9 +10,11 @@ find_package(ament_cmake REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(knowledge_interfaces REQUIRED)
 find_package(yaml-cpp REQUIRED)
+find_package(ament_index_cpp REQUIRED)
 
 add_executable(knowledge_manager_node
   src/knowledge_manager_node.cpp
+  src/main.cpp
   src/loaders/locations_loader.cpp
   src/loaders/default_loader.cpp
   src/loaders/world_loader.cpp
@@ -25,6 +27,7 @@ ament_target_dependencies(
   knowledge_manager_node
   "rclcpp"
   "knowledge_interfaces"
+  "ament_index_cpp"
 )
 
 target_link_libraries(knowledge_manager_node
