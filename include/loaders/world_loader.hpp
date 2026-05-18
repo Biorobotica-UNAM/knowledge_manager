@@ -2,11 +2,13 @@
 
 #include <string>
 #include <vector>
+#include <yaml-cpp/yaml.h>
 
 struct RobotDescription {
   std::string name{};
   std::string location{};
-  std::string holding{};
+  std::string left_hand{};
+  std::string right_hand{};
 };
 
 struct ObjectDescription {
@@ -48,8 +50,13 @@ private:
   const std::vector<std::string> &objects_ref_;
   const std::vector<std::string> &persons_ref_;
 
-  bool check_known_location(const std::string &location);
-  bool check_object(const std::string &object);
+  bool is_known_location(const std::string &location) const; // acepta "unknown"
+  bool is_known_object(const std::string &object) const;     // acepta "nothing"
   bool is_valid_field(const std::string &value,
-                      const std::vector<std::string> &ref);
+                      const std::vector<std::string> &ref) const;
+
+  RobotDescription parse_robot(const YAML::Node &node) const;
+  std::vector<std::string> parse_known_locations(const YAML::Node &node) const;
+  std::vector<ObjectDescription> parse_objects(const YAML::Node &node) const;
+  std::vector<PersonDescription> parse_people(const YAML::Node &node) const;
 };

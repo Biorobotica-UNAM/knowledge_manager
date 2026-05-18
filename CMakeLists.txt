@@ -15,9 +15,10 @@ find_package(ament_index_cpp REQUIRED)
 
 add_executable(knowledge_manager_node
   src/knowledge_manager_node.cpp
+  src/phrase_manager_node.cpp
   src/main.cpp
-  src/loaders/locations_loader.cpp
   src/loaders/default_loader.cpp
+  src/loaders/phrase_loader.cpp
   src/loaders/world_loader.cpp
 )
 target_include_directories(knowledge_manager_node PUBLIC
