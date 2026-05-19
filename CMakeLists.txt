@@ -5,7 +5,7 @@ if(CMAKE_COMPILER_IS_GNUCXX OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")
   add_compile_options(-Wall -Wextra -Wpedantic)
 endif()
 
-# find dependencies
+# Dependencies
 find_package(ament_cmake REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(knowledge_interfaces REQUIRED)
@@ -13,41 +13,51 @@ find_package(yaml-cpp REQUIRED)
 find_package(nlohmann_json REQUIRED)
 find_package(ament_index_cpp REQUIRED)
 
-add_executable(knowledge_manager_node
+# ── world_state_node ──────────────────────────────────────────────────────────
+add_executable(world_state_node
+  src/main_world.cpp
   src/knowledge_manager_node.cpp
-  src/phrase_manager_node.cpp
-  src/main.cpp
   src/loaders/default_loader.cpp
-  src/loaders/phrase_loader.cpp
   src/loaders/world_loader.cpp
 )
-target_include_directories(knowledge_manager_node PUBLIC
+target_include_directories(world_state_node PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
   $<INSTALL_INTERFACE:include/${PROJECT_NAME}>)
-target_compile_features(knowledge_manager_node PUBLIC c_std_99 cxx_std_17)  # Require C99 and C++17
-ament_target_dependencies(
-  knowledge_manager_node
-  "rclcpp"
-  "knowledge_interfaces"
-  "ament_index_cpp"
+target_compile_features(world_state_node PUBLIC c_std_99 cxx_std_17)
+ament_target_dependencies(world_state_node
+  rclcpp
+  knowledge_interfaces
+  ament_index_cpp
 )
+target_link_libraries(world_state_node yaml-cpp)
 
-target_link_libraries(knowledge_manager_node
-  yaml-cpp
+# ── phrase_manager_node ───────────────────────────────────────────────────────
+add_executable(phrase_manager_node
+  src/main_phrase.cpp
+  src/phrase_manager_node.cpp
+  src/loaders/phrase_loader.cpp
 )
+target_include_directories(phrase_manager_node PUBLIC
+  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+  $<INSTALL_INTERFACE:include/${PROJECT_NAME}>)
+target_compile_features(phrase_manager_node PUBLIC c_std_99 cxx_std_17)
+ament_target_dependencies(phrase_manager_node
+  rclcpp
+  knowledge_interfaces
+  ament_index_cpp
+)
+target_link_libraries(phrase_manager_node yaml-cpp)
 
-
-install(TARGETS knowledge_manager_node
-  DESTINATION lib/${PROJECT_NAME})
+# ── Install ───────────────────────────────────────────────────────────────────
+install(TARGETS
+  world_state_node
+  phrase_manager_node
+  DESTINATION lib/${PROJECT_NAME}
+)
 
 if(BUILD_TESTING)
   find_package(ament_lint_auto REQUIRED)
-  # the following line skips the linter which checks for copyrights
-  # comment the line when a copyright and license is added to all source files
   set(ament_cmake_copyright_FOUND TRUE)
-  # the following line skips cpplint (only works in a git repo)
-  # comment the line when this package is in a git repo and when
-  # a copyright and license is added to all source files
   set(ament_cmake_cpplint_FOUND TRUE)
   ament_lint_auto_find_test_dependencies()
 endif()

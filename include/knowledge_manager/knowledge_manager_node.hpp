@@ -36,9 +36,6 @@ private:
       const std::shared_ptr<UpdateWorldState::Request> request,
       const std::shared_ptr<UpdateWorldState::Response> response);
 
-  // Lectura del estado actual desde disco
-  WorldState build_current_state() const;
-
   // Serialización a JSON
   json build_robot_json(const WorldState &state) const;
   json build_objects_json(const WorldState &state) const;

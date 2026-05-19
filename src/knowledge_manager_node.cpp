@@ -84,21 +84,20 @@ WorldState WorldStateNode::build_initial_state() {
 void WorldStateNode::get_world_state_callback(
     const std::shared_ptr<GetWorldState::Request> request,
     const std::shared_ptr<GetWorldState::Response> response) {
-  const WorldState current = build_current_state();
   const std::string &field = request->field;
 
   RCLCPP_INFO(this->get_logger(), "Get request received: '%s'", field.c_str());
 
   if (field == "robot") {
-    response->json = build_robot_json(current).dump(2);
+    response->json = build_robot_json(state_).dump(2);
   } else if (field == "objects") {
-    response->json = build_objects_json(current).dump(2);
+    response->json = build_objects_json(state_).dump(2);
   } else if (field == "known_locations") {
-    response->json = build_locations_json(current).dump(2);
+    response->json = build_locations_json(state_).dump(2);
   } else if (field == "people") {
-    response->json = build_people_json(current).dump(2);
+    response->json = build_people_json(state_).dump(2);
   } else if (field.empty()) {
-    response->json = build_world_json(current);
+    response->json = build_world_json(state_);
   } else {
     RCLCPP_WARN(this->get_logger(), "Unknown field requested: '%s'",
                 field.c_str());
@@ -119,15 +118,6 @@ void WorldStateNode::update_world_state_callback(
     RCLCPP_ERROR(this->get_logger(), "Failed updating world state: %s",
                  e.what());
   }
-}
-
-// ---------------------------------------------------------------------------
-// Lectura
-// ---------------------------------------------------------------------------
-
-WorldState WorldStateNode::build_current_state() const {
-  return WorldLoader(output_path_, locations_ref_, objects_ref_, people_ref_)
-      .build();
 }
 
 // ---------------------------------------------------------------------------
@@ -224,7 +214,17 @@ void WorldStateNode::update_robot_state(const json &robot) {
     state_.robot.name = sym(robot["name"]);
   }
   if (robot.contains("room")) {
-    state_.robot.location = sym(robot["room"]);
+    const std::string room = sym(robot["room"]);
+    const bool valid =
+        room == "unknown" ||
+        std::binary_search(locations_ref_.begin(), locations_ref_.end(), room);
+    if (valid) {
+      state_.robot.location = room;
+    } else {
+      RCLCPP_WARN(this->get_logger(),
+                  "update_robot_state: invalid location '%s', ignoring.",
+                  room.c_str());
+    }
   }
   if (robot.contains("left_hand")) {
     state_.robot.left_hand = sym(robot["left_hand"]);
@@ -241,18 +241,35 @@ void WorldStateNode::update_object_state(const json &obj) {
       std::find_if(state_.objects.begin(), state_.objects.end(),
                    [&](const ObjectDescription &o) { return o.name == name; });
 
-  if (it == state_.objects.end()) {
-    ObjectDescription new_obj;
-    new_obj.name = name;
-    if (obj.contains("room")) {
-      new_obj.locations.push_back(sym(obj["room"]));
+  if (obj.contains("room")) {
+    const std::string room = sym(obj["room"]);
+    const bool valid =
+        room == "unknown" ||
+        std::binary_search(locations_ref_.begin(), locations_ref_.end(), room);
+
+    if (!valid) {
+      RCLCPP_WARN(this->get_logger(),
+                  "update_object_state: invalid location '%s' for object '%s', "
+                  "ignoring.",
+                  room.c_str(), name.c_str());
+      return;
     }
-    state_.objects.push_back(new_obj);
+
+    if (it == state_.objects.end()) {
+      ObjectDescription new_obj;
+      new_obj.name = name;
+      new_obj.locations.push_back(room);
+      state_.objects.push_back(new_obj);
+    } else {
+      it->locations = {room};
+    }
     return;
   }
 
-  if (obj.contains("room")) {
-    it->locations = {sym(obj["room"])};
+  if (it == state_.objects.end()) {
+    ObjectDescription new_obj;
+    new_obj.name = name;
+    state_.objects.push_back(new_obj);
   }
 }
 
@@ -278,7 +295,17 @@ void WorldStateNode::update_person_state(const json &person_json) {
   }
 
   if (person_json.contains("room")) {
-    it->room = sym(person_json["room"]);
+    const std::string room = sym(person_json["room"]);
+    const bool valid =
+        room == "unknown" ||
+        std::binary_search(locations_ref_.begin(), locations_ref_.end(), room);
+    if (valid) {
+      it->room = room;
+    } else {
+      RCLCPP_WARN(this->get_logger(),
+                  "update_person_state: invalid location '%s', ignoring.",
+                  room.c_str());
+    }
   }
   if (person_json.contains("gender")) {
     it->gender = sym(person_json["gender"]);
@@ -343,7 +370,8 @@ void WorldStateNode::save_state(const WorldState &state,
   out << YAML::Key << "objects" << YAML::Value << YAML::BeginMap;
   for (const auto &obj : state.objects) {
     out << YAML::Key << obj.name << YAML::Value << YAML::BeginMap;
-    out << YAML::Key << "locations" << YAML::Value << YAML::BeginSeq;
+    out << YAML::Key << "locations" << YAML::Value << YAML::Flow
+        << YAML::BeginSeq;
     for (const auto &loc : obj.locations) {
       out << loc;
     }
@@ -364,7 +392,8 @@ void WorldStateNode::save_state(const WorldState &state,
     out << YAML::Key << "hair_style" << YAML::Value << person.hair_style;
     out << YAML::Key << "shirt_color" << YAML::Value << person.shirt_color;
     out << YAML::Key << "room" << YAML::Value << person.room;
-    out << YAML::Key << "accessories" << YAML::Value << YAML::BeginSeq;
+    out << YAML::Key << "accessories" << YAML::Value << YAML::Flow
+        << YAML::BeginSeq;
     for (const auto &acc : person.accessories) {
       out << acc;
     }
