@@ -17,6 +17,7 @@ struct ObjectDescription {
 };
 
 struct PersonDescription {
+  short int number{};
   std::string name{"unknown"};
   std::string gender{"unknown"};
   std::string age_group{"unknown"};

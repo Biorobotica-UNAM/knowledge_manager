@@ -101,18 +101,22 @@ WorldLoader::parse_people(const YAML::Node &node) const {
   std::vector<PersonDescription> persons;
 
   for (const auto &person_node : node) {
-    auto field = [&](const std::string &key) -> std::string {
-      return person_node[key] ? person_node[key].as<std::string>() : "unknown";
+
+    auto field = [&](const std::string &key, auto default_value) {
+      using T = decltype(default_value);
+      return person_node[key] ? person_node[key].as<T>() : default_value;
     };
 
-    const std::string name = field("name");
-    const std::string gender = field("gender");
-    const std::string age_group = field("age_group");
-    const std::string emotion = field("emotion");
-    const std::string hair_color = field("hair_color");
-    const std::string hair_style = field("hair_style");
-    const std::string shirt_color = field("shirt_color");
-    const std::string room = field("room");
+    const short int number = field("number", static_cast<short int>(0));
+    const std::string name = field("name", std::string("unknown"));
+    const std::string gender = field("gender", std::string("unknown"));
+    const std::string age_group = field("age_group", std::string("unknown"));
+    const std::string emotion = field("emotion", std::string("unknown"));
+    const std::string hair_color = field("hair_color", std::string("unknown"));
+    const std::string hair_style = field("hair_style", std::string("unknown"));
+    const std::string shirt_color =
+        field("shirt_color", std::string("unknown"));
+    const std::string room = field("room", std::string("unknown"));
 
     std::vector<std::string> accessories;
     if (person_node["accessories"] && person_node["accessories"].IsSequence()) {
@@ -139,6 +143,7 @@ WorldLoader::parse_people(const YAML::Node &node) const {
     }
 
     PersonDescription person{};
+    person.number = number;
     person.name = name;
     person.gender = gender;
     person.age_group = age_group;

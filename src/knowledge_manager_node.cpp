@@ -159,6 +159,7 @@ json WorldStateNode::build_people_json(const WorldState &state) const {
 
   for (const auto &person : state.persons) {
     json j;
+    j["number"] = person.number;
     j["name"] = person.name;
     j["gender"] = person.gender;
     j["age_group"] = person.age_group;
@@ -281,17 +282,34 @@ void WorldStateNode::update_objects_table(const json &objects) {
 }
 
 void WorldStateNode::update_person_state(const json &person_json) {
-  const std::string name = sym(person_json.value("name", "unknown"));
+  short int number = 0;
 
-  auto it =
-      std::find_if(state_.persons.begin(), state_.persons.end(),
-                   [&](const PersonDescription &p) { return p.name == name; });
+  if (person_json.contains("number")) {
+    number = person_json["number"].get<short int>();
+
+  } else {
+    short int max_number = 0;
+
+    for (const auto &p : state_.persons) {
+      max_number = std::max(max_number, p.number);
+    }
+
+    number = max_number + 1;
+  }
+
+  auto it = std::find_if(
+      state_.persons.begin(), state_.persons.end(),
+      [&](const PersonDescription &p) { return p.number == number; });
 
   if (it == state_.persons.end()) {
     PersonDescription person{};
-    person.name = name;
+    person.number = number;
     state_.persons.push_back(person);
     it = std::prev(state_.persons.end());
+  }
+
+  if (person_json.contains("name")) {
+    it->name = sym(person_json["name"]);
   }
 
   if (person_json.contains("room")) {
@@ -307,28 +325,36 @@ void WorldStateNode::update_person_state(const json &person_json) {
                   room.c_str());
     }
   }
+
   if (person_json.contains("gender")) {
     it->gender = sym(person_json["gender"]);
   }
+
   if (person_json.contains("emotion")) {
     it->emotion = sym(person_json["emotion"]);
   }
+
   if (person_json.contains("shirt_color")) {
     it->shirt_color = sym(person_json["shirt_color"]);
   }
+
   if (person_json.contains("hair_color")) {
     it->hair_color = sym(person_json["hair_color"]);
   }
+
   if (person_json.contains("hair_style")) {
     it->hair_style = sym(person_json["hair_style"]);
   }
+
   if (person_json.contains("age_group")) {
     it->age_group = sym(person_json["age_group"]);
   }
 
   if (person_json.contains("accessories") &&
       person_json["accessories"].is_array()) {
+
     it->accessories.clear();
+
     for (const auto &acc : person_json["accessories"]) {
       it->accessories.push_back(sym(acc));
     }
@@ -384,6 +410,7 @@ void WorldStateNode::save_state(const WorldState &state,
   out << YAML::Key << "people" << YAML::Value << YAML::BeginSeq;
   for (const auto &person : state.persons) {
     out << YAML::BeginMap;
+    out << YAML::Key << "number" << YAML::Value << person.number;
     out << YAML::Key << "name" << YAML::Value << person.name;
     out << YAML::Key << "gender" << YAML::Value << person.gender;
     out << YAML::Key << "age_group" << YAML::Value << person.age_group;
