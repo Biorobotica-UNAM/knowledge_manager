@@ -68,27 +68,37 @@ WorldLoader::parse_known_locations(const YAML::Node &node) const {
 
 std::vector<ObjectDescription>
 WorldLoader::parse_objects(const YAML::Node &node) const {
+
   std::vector<ObjectDescription> objects;
 
   for (const auto &object_node : node) {
-    const std::string name = object_node.first.as<std::string>();
+
+    auto field = [&](const std::string &key, auto default_value) {
+      using T = decltype(default_value);
+      return object_node[key] ? object_node[key].as<T>() : default_value;
+    };
+
+    const short int number = field("number", static_cast<short int>(0));
+    const std::string name = field("name", std::string("unknown"));
 
     if (!is_known_object(name)) {
       continue;
     }
 
-    ObjectDescription object{};
-    object.name = name;
-
-    const YAML::Node &data = object_node.second;
-    if (data["locations"] && data["locations"].IsSequence()) {
-      for (const auto &loc : data["locations"]) {
+    std::vector<std::string> locations;
+    if (object_node["locations"] && object_node["locations"].IsSequence()) {
+      for (const auto &loc : object_node["locations"]) {
         const std::string location = loc.as<std::string>();
         if (is_known_location(location)) {
-          object.locations.push_back(location);
+          locations.push_back(location);
         }
       }
     }
+
+    ObjectDescription object{};
+    object.number = number;
+    object.name = name;
+    object.locations = locations;
 
     objects.push_back(object);
   }

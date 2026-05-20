@@ -1,6 +1,7 @@
 #include "knowledge_manager/knowledge_manager_node.hpp"
 
 #include <algorithm>
+#include <boost/mpl/aux_/na_fwd.hpp>
 #include <cctype>
 #include <exception>
 #include <fstream>
@@ -9,6 +10,7 @@
 
 #include <ament_index_cpp/get_package_share_directory.hpp>
 #include <rclcpp/logging.hpp>
+#include <string>
 #include <yaml-cpp/emitter.h>
 #include <yaml-cpp/emittermanip.h>
 #include <yaml-cpp/yaml.h>
@@ -84,23 +86,24 @@ WorldState WorldStateNode::build_initial_state() {
 void WorldStateNode::get_world_state_callback(
     const std::shared_ptr<GetWorldState::Request> request,
     const std::shared_ptr<GetWorldState::Response> response) {
-  const std::string &field = request->field;
+  const std::string &category = request->category;
+  const std::string &id = request->id;
+  const std::string &attribute = request->attribute;
 
-  RCLCPP_INFO(this->get_logger(), "Get request received: '%s'", field.c_str());
-
-  if (field == "robot") {
-    response->json = build_robot_json(state_).dump(2);
-  } else if (field == "objects") {
-    response->json = build_objects_json(state_).dump(2);
-  } else if (field == "known_locations") {
+  if (category == "robot") {
+    response->json = build_robot_json(state_, attribute).dump(2);
+  } else if (category == "people") {
+    response->json = build_people_json(state_, id, attribute).dump(2);
+  } else if (category == "objects") {
+    response->json = build_objects_json(state_, id, attribute).dump(2);
+  } else if (category == "known_locations") {
     response->json = build_locations_json(state_).dump(2);
-  } else if (field == "people") {
-    response->json = build_people_json(state_).dump(2);
-  } else if (field.empty()) {
+  } else if (category == "world") {
     response->json = build_world_json(state_);
   } else {
-    RCLCPP_WARN(this->get_logger(), "Unknown field requested: '%s'",
-                field.c_str());
+    RCLCPP_WARN(this->get_logger(), "Unknown category \'%s\'",
+                category.c_str());
+    response->json = "{}";
   }
 }
 
@@ -124,28 +127,65 @@ void WorldStateNode::update_world_state_callback(
 // Serialización JSON
 // ---------------------------------------------------------------------------
 
-json WorldStateNode::build_robot_json(const WorldState &state) const {
-  json j;
-  j["name"] = state.robot.name;
-  j["location"] = state.robot.location;
-  j["left_hand"] = state.robot.left_hand;
-  j["right_hand"] = state.robot.right_hand;
-  return j;
-}
+json WorldStateNode::build_robot_json(const WorldState &state,
+                                      const std::string &attribute) const {
+  const auto &robot = state.robot;
 
-json WorldStateNode::build_objects_json(const WorldState &state) const {
-  json j_objects = json::array();
-
-  for (const auto &obj : state.objects) {
-    json j_obj;
-    j_obj["name"] = obj.name;
-    j_obj["locations"] = obj.locations;
-    j_objects.push_back(j_obj);
+  if (attribute.empty()) {
+    json j;
+    j["name"] = robot.name;
+    j["location"] = robot.location;
+    j["left_hand"] = robot.left_hand;
+    j["right_hand"] = robot.right_hand;
+    return j;
   }
 
-  json result;
-  result["objects"] = j_objects;
-  return result;
+  if (attribute == "name") {
+    return robot.name;
+  }
+
+  if (attribute == "location") {
+    return robot.location;
+  }
+
+  if (attribute == "left_hand") {
+    return robot.left_hand;
+  }
+
+  if (attribute == "right_hand") {
+    return robot.right_hand;
+  }
+
+  // Invalid attribute
+  return nullptr;
+}
+
+json WorldStateNode::build_objects_json(const WorldState &state,
+                                        const std::string &id,
+                                        const std::string &attribute) const {
+  // Todos los objetos
+  if (id.empty()) {
+    json arr = json::array();
+    for (const auto &obj : state.objects) {
+      arr.push_back(object_to_json(obj));
+    }
+    return {{"objects", arr}};
+  }
+
+  // Buscar objeto
+  const short int number = static_cast<short int>(std::stoi(id));
+  auto it = find_object_by_id(state, number);
+  if (it == state.objects.end()) {
+    return nullptr;
+  }
+
+  // Objeto completo
+  if (attribute.empty()) {
+    return object_to_json(*it);
+  }
+
+  // Attributo específico
+  return object_attribute_to_json(*it, attribute);
 }
 
 json WorldStateNode::build_locations_json(const WorldState &state) const {
@@ -154,27 +194,32 @@ json WorldStateNode::build_locations_json(const WorldState &state) const {
   return j;
 }
 
-json WorldStateNode::build_people_json(const WorldState &state) const {
-  json j_people = json::array();
-
-  for (const auto &person : state.persons) {
-    json j;
-    j["number"] = person.number;
-    j["name"] = person.name;
-    j["gender"] = person.gender;
-    j["age_group"] = person.age_group;
-    j["emotion"] = person.emotion;
-    j["hair_color"] = person.hair_color;
-    j["hair_style"] = person.hair_style;
-    j["shirt_color"] = person.shirt_color;
-    j["room"] = person.room;
-    j["accessories"] = person.accessories;
-    j_people.push_back(j);
+json WorldStateNode::build_people_json(const WorldState &state,
+                                       const std::string &id,
+                                       const std::string &attribute) const {
+  // Todas las personas
+  if (id.empty()) {
+    json arr = json::array();
+    for (const auto &person : state.persons) {
+      arr.push_back(person_to_json(person));
+    }
+    return {{"people", arr}};
   }
 
-  json result;
-  result["people"] = j_people;
-  return result;
+  // Buscar persona
+  const short int number = static_cast<short int>(std::stoi(id));
+  auto it = find_person_by_id(state, number);
+  if (it == state.persons.end()) {
+    return nullptr;
+  }
+
+  // Persona completa
+  if (attribute.empty()) {
+    return person_to_json(*it);
+  }
+
+  // Atributo específico
+  return person_attribute_to_json(*it, attribute);
 }
 
 std::string WorldStateNode::build_world_json(const WorldState &state) const {
@@ -236,41 +281,49 @@ void WorldStateNode::update_robot_state(const json &robot) {
 }
 
 void WorldStateNode::update_object_state(const json &obj) {
-  const std::string name = sym(obj.value("name", "unknown"));
+  short int number = 0;
 
-  auto it =
-      std::find_if(state_.objects.begin(), state_.objects.end(),
-                   [&](const ObjectDescription &o) { return o.name == name; });
+  if (obj.contains("number")) {
+    number = obj["number"].get<short int>();
+  } else {
+    short int max_number = 0;
+    for (const auto &o : state_.objects) {
+      max_number = std::max(max_number, o.number);
+    }
+    number = max_number + 1;
+  }
+
+  auto it = std::find_if(
+      state_.objects.begin(), state_.objects.end(),
+      [&](const ObjectDescription &o) { return o.number == number; });
+
+  if (it == state_.objects.end()) {
+
+    ObjectDescription object{};
+    object.number = number;
+    state_.objects.push_back(object);
+    it = std::prev(state_.objects.end());
+  }
+
+  if (obj.contains("name")) {
+    it->name = sym(obj["name"]);
+  }
 
   if (obj.contains("room")) {
+
     const std::string room = sym(obj["room"]);
     const bool valid =
         room == "unknown" ||
         std::binary_search(locations_ref_.begin(), locations_ref_.end(), room);
-
     if (!valid) {
       RCLCPP_WARN(this->get_logger(),
-                  "update_object_state: invalid location '%s' for object '%s', "
-                  "ignoring.",
-                  room.c_str(), name.c_str());
+                  "update_object_state: invalid location '%s' "
+                  "for object #%d, ignoring.",
+                  room.c_str(), number);
       return;
     }
 
-    if (it == state_.objects.end()) {
-      ObjectDescription new_obj;
-      new_obj.name = name;
-      new_obj.locations.push_back(room);
-      state_.objects.push_back(new_obj);
-    } else {
-      it->locations = {room};
-    }
-    return;
-  }
-
-  if (it == state_.objects.end()) {
-    ObjectDescription new_obj;
-    new_obj.name = name;
-    state_.objects.push_back(new_obj);
+    it->locations = {room};
   }
 }
 
@@ -393,18 +446,23 @@ void WorldStateNode::save_state(const WorldState &state,
   out << YAML::EndSeq;
 
   // Objects
-  out << YAML::Key << "objects" << YAML::Value << YAML::BeginMap;
+  out << YAML::Key << "objects" << YAML::Value << YAML::BeginSeq;
+
   for (const auto &obj : state.objects) {
-    out << YAML::Key << obj.name << YAML::Value << YAML::BeginMap;
+
+    out << YAML::BeginMap;
+    out << YAML::Key << "number" << YAML::Value << obj.number;
+    out << YAML::Key << "name" << YAML::Value << obj.name;
     out << YAML::Key << "locations" << YAML::Value << YAML::Flow
         << YAML::BeginSeq;
+
     for (const auto &loc : obj.locations) {
       out << loc;
     }
     out << YAML::EndSeq;
     out << YAML::EndMap;
   }
-  out << YAML::EndMap;
+  out << YAML::EndSeq;
 
   // People
   out << YAML::Key << "people" << YAML::Value << YAML::BeginSeq;
@@ -456,4 +514,82 @@ std::string WorldStateNode::sym(const json &value) const {
   std::transform(s.begin(), s.end(), s.begin(), ::tolower);
   std::replace(s.begin(), s.end(), ' ', '_');
   return s.empty() ? "unknown" : s;
+}
+
+json WorldStateNode::person_to_json(const PersonDescription &person) const {
+  return {{"number", person.number},
+          {"name", person.name},
+          {"gender", person.gender},
+          {"age_group", person.age_group},
+          {"emotion", person.emotion},
+          {"hair_color", person.hair_color},
+          {"hair_style", person.hair_style},
+          {"shirt_color", person.shirt_color},
+          {"room", person.room},
+          {"accessories", person.accessories}};
+}
+
+json WorldStateNode::person_attribute_to_json(
+    const PersonDescription &person, const std::string &attribute) const {
+  if (attribute == "number") {
+    return person.number;
+  } else if (attribute == "name") {
+    return person.name;
+  } else if (attribute == "gender") {
+    return person.gender;
+  } else if (attribute == "age_group") {
+    return person.age_group;
+  } else if (attribute == "emotion") {
+    return person.emotion;
+  } else if (attribute == "hair_color") {
+    return person.hair_color;
+  } else if (attribute == "hair_style") {
+    return person.hair_style;
+  } else if (attribute == "shirt_color") {
+    return person.shirt_color;
+  } else if (attribute == "room") {
+    return person.room;
+  } else if (attribute == "accessories") {
+    return person.accessories;
+  }
+
+  return nullptr;
+}
+
+std::vector<PersonDescription>::const_iterator
+WorldStateNode::find_person_by_id(const WorldState &state,
+                                  short int number) const {
+  return std::find_if(
+      state.persons.begin(), state.persons.end(),
+      [&](const PersonDescription &p) { return p.number == number; });
+}
+
+json WorldStateNode::object_to_json(const ObjectDescription &obj) const {
+  return {
+      {"number", obj.number}, {"name", obj.name}, {"locations", obj.locations}};
+}
+
+json WorldStateNode::object_attribute_to_json(
+    const ObjectDescription &obj, const std::string &attribute) const {
+  if (attribute == "number") {
+    return obj.number;
+  }
+
+  if (attribute == "name") {
+    return obj.name;
+  }
+
+  if (attribute == "locations") {
+    return obj.locations;
+  }
+
+  return nullptr;
+}
+
+std::vector<ObjectDescription>::const_iterator
+WorldStateNode::find_object_by_id(const WorldState &state,
+                                  const short int number) const {
+  return std::find_if(
+      state.objects.begin(), state.objects.end(),
+      [&](const ObjectDescription &obj) { return obj.number == number; });
 }

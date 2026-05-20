@@ -12,6 +12,7 @@ struct RobotDescription {
 };
 
 struct ObjectDescription {
+  short int number{};
   std::string name{};
   std::vector<std::string> locations{};
 };
