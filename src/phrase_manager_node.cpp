@@ -40,7 +40,7 @@ PhraseManagerNode::PhraseManagerNode()
       service_qos, service_callback_group_);
 
   world_state_client_ = this->create_client<GetWorldState>(
-      "/world/get_state", service_qos, client_callback_group_);
+      "world/get_state", service_qos, client_callback_group_);
 
   RCLCPP_INFO(this->get_logger(),
               "Phrase manager ready. %zu contexts loaded. "
