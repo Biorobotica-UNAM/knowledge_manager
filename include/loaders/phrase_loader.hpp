@@ -4,22 +4,21 @@
 #include <string>
 #include <vector>
 
-// Carga todos los archivos YAML de un directorio y construye
-// un mapa de: context -> key -> [frases]
-// donde context es el nombre del archivo sin extensión (ej: "hri")
+// Loads all YAML files from a directory and builds a phrase map:
+// context -> key -> [phrases]
+// where context is the filename stem (e.g., "hri")
 class PhraseLoader {
 public:
   explicit PhraseLoader(const std::string &phrases_dir);
 
-  // Devuelve { context -> { key -> [phrase, ...] } }
-  std::map<std::string, std::map<std::string, std::vector<std::string>>>
-  build();
+  using PhraseMap =
+      std::map<std::string, std::map<std::string, std::vector<std::string>>>;
+
+  PhraseMap build() const;
 
 private:
   std::string phrases_dir_;
 
-  void load_file(
-      const std::string &filepath, const std::string &context,
-      std::map<std::string, std::map<std::string, std::vector<std::string>>>
-          &out);
+  void load_file(const std::string &filepath, const std::string &context,
+                 PhraseMap &out) const;
 };

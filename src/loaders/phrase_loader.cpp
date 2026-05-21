@@ -8,10 +8,8 @@ namespace fs = std::filesystem;
 PhraseLoader::PhraseLoader(const std::string &phrases_dir)
     : phrases_dir_(phrases_dir) {}
 
-std::map<std::string, std::map<std::string, std::vector<std::string>>>
-PhraseLoader::build() {
-  std::map<std::string, std::map<std::string, std::vector<std::string>>>
-      phrase_map;
+PhraseLoader::PhraseMap PhraseLoader::build() const {
+  PhraseMap phrase_map;
 
   for (const auto &entry : fs::directory_iterator(phrases_dir_)) {
     if (!entry.is_regular_file()) {
@@ -30,15 +28,12 @@ PhraseLoader::build() {
   return phrase_map;
 }
 
-void PhraseLoader::load_file(
-    const std::string &filepath, const std::string &context,
-    std::map<std::string, std::map<std::string, std::vector<std::string>>>
-        &out) {
-  YAML::Node root = YAML::LoadFile(filepath);
+void PhraseLoader::load_file(const std::string &filepath,
+                             const std::string &context, PhraseMap &out) const {
+  const YAML::Node root = YAML::LoadFile(filepath);
 
   for (const auto &node : root) {
     const std::string key = node.first.as<std::string>();
-
     for (const auto &val : node.second) {
       out[context][key].push_back(val.as<std::string>());
     }
