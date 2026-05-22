@@ -26,6 +26,7 @@ struct PersonDescription {
   std::string hair_color{"unknown"};
   std::string hair_style{"unknown"};
   std::string shirt_color{"unknown"};
+  std::string drink{"unknown"};
   std::string room{"unknown"};
   std::vector<std::string> accessories{};
 };

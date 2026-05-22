@@ -51,8 +51,7 @@ void WorldStateNode::build_paths() {
 }
 
 void WorldStateNode::build_references() {
-  // El loader de locations excluye keys que terminan en "_name"
-  locations_ref_ = DefaultLoader(locations_path_, "_name").build();
+  locations_ref_ = DefaultLoader(locations_path_).build();
   objects_ref_ = DefaultLoader(objects_path_).build();
   people_ref_ = DefaultLoader(people_path_).build();
 
@@ -399,6 +398,10 @@ void WorldStateNode::update_person_state(const json &person_json) {
     it->hair_style = sym(person_json["hair_style"]);
   }
 
+  if (person_json.contains("drink")) {
+    it->drink = sym(person_json["drink"]);
+  }
+
   if (person_json.contains("age_group")) {
     it->age_group = sym(person_json["age_group"]);
   }
@@ -476,6 +479,7 @@ void WorldStateNode::save_state(const WorldState &state,
     out << YAML::Key << "hair_color" << YAML::Value << person.hair_color;
     out << YAML::Key << "hair_style" << YAML::Value << person.hair_style;
     out << YAML::Key << "shirt_color" << YAML::Value << person.shirt_color;
+    out << YAML::Key << "drink" << YAML::Value << person.drink;
     out << YAML::Key << "room" << YAML::Value << person.room;
     out << YAML::Key << "accessories" << YAML::Value << YAML::Flow
         << YAML::BeginSeq;
@@ -525,6 +529,7 @@ json WorldStateNode::person_to_json(const PersonDescription &person) const {
           {"hair_color", person.hair_color},
           {"hair_style", person.hair_style},
           {"shirt_color", person.shirt_color},
+          {"drink", person.drink},
           {"room", person.room},
           {"accessories", person.accessories}};
 }
@@ -546,7 +551,8 @@ json WorldStateNode::person_attribute_to_json(
   } else if (attribute == "hair_style") {
     return person.hair_style;
   } else if (attribute == "shirt_color") {
-    return person.shirt_color;
+  } else if (attribute == "drink") {
+    return person.drink;
   } else if (attribute == "room") {
     return person.room;
   } else if (attribute == "accessories") {

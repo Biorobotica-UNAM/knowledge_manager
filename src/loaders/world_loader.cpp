@@ -126,6 +126,7 @@ WorldLoader::parse_people(const YAML::Node &node) const {
     const std::string hair_style = field("hair_style", std::string("unknown"));
     const std::string shirt_color =
         field("shirt_color", std::string("unknown"));
+    const std::string drink = field("drink", std::string("unknown"));
     const std::string room = field("room", std::string("unknown"));
 
     std::vector<std::string> accessories;
@@ -161,6 +162,7 @@ WorldLoader::parse_people(const YAML::Node &node) const {
     person.hair_color = hair_color;
     person.hair_style = hair_style;
     person.shirt_color = shirt_color;
+    person.drink = drink;
     person.room = room;
     person.accessories = accessories;
 
