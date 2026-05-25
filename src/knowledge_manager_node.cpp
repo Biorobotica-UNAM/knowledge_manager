@@ -324,6 +324,22 @@ void WorldStateNode::update_object_state(const json &obj) {
 
     it->locations = {room};
   }
+
+  if (obj.contains("navigation") && obj["navigation"].is_array()) {
+    it->navigation.clear();
+
+    for (const auto &coord : obj["navigation"]) {
+      it->navigation.push_back(coord);
+    }
+  }
+
+  if (obj.contains("manipulation") && obj["manipulation"].is_array()) {
+    it->manipulation.clear();
+
+    for (const auto &coord : obj["manipulation"]) {
+      it->manipulation.push_back(coord);
+    }
+  }
 }
 
 void WorldStateNode::update_objects_table(const json &objects) {
@@ -415,6 +431,23 @@ void WorldStateNode::update_person_state(const json &person_json) {
       it->accessories.push_back(sym(acc));
     }
   }
+
+  if (person_json.contains("order") && person_json["order"].is_array()) {
+    it->order.clear();
+
+    for (const auto &ord : person_json["order"]) {
+      it->order.push_back(sym(ord));
+    }
+  }
+
+  if (person_json.contains("navigation") &&
+      person_json["navigation"].is_array()) {
+    it->navigation.clear();
+
+    for (const auto &coord : person_json["navigation"]) {
+      it->navigation.push_back(coord);
+    }
+  }
 }
 
 void WorldStateNode::update_people_table(const json &persons) {
@@ -463,6 +496,18 @@ void WorldStateNode::save_state(const WorldState &state,
       out << loc;
     }
     out << YAML::EndSeq;
+    out << YAML::Key << "navigation" << YAML::Value << YAML::Flow
+        << YAML::BeginSeq;
+    for (const auto &coord : obj.navigation) {
+      out << coord;
+    }
+    out << YAML::EndSeq;
+    out << YAML::Key << "manipulation" << YAML::Value << YAML::Flow
+        << YAML::BeginSeq;
+    for (const auto &coord : obj.manipulation) {
+      out << coord;
+    }
+    out << YAML::EndSeq;
     out << YAML::EndMap;
   }
   out << YAML::EndSeq;
@@ -485,6 +530,17 @@ void WorldStateNode::save_state(const WorldState &state,
         << YAML::BeginSeq;
     for (const auto &acc : person.accessories) {
       out << acc;
+    }
+    out << YAML::EndSeq;
+    out << YAML::Key << "order" << YAML::Value << YAML::Flow << YAML::BeginSeq;
+    for (const auto &ord : person.order) {
+      out << ord;
+    }
+    out << YAML::EndSeq;
+    out << YAML::Key << "navigation" << YAML::Value << YAML::Flow
+        << YAML::BeginSeq;
+    for (const auto &coord : person.navigation) {
+      out << coord;
     }
     out << YAML::EndSeq;
     out << YAML::EndMap;
@@ -531,7 +587,9 @@ json WorldStateNode::person_to_json(const PersonDescription &person) const {
           {"shirt_color", person.shirt_color},
           {"drink", person.drink},
           {"room", person.room},
-          {"accessories", person.accessories}};
+          {"accessories", person.accessories},
+          {"order", person.order},
+          {"navigation", person.navigation}};
 }
 
 json WorldStateNode::person_attribute_to_json(
@@ -557,6 +615,10 @@ json WorldStateNode::person_attribute_to_json(
     return person.room;
   } else if (attribute == "accessories") {
     return person.accessories;
+  } else if (attribute == "order") {
+    return person.order;
+  } else if (attribute == "navigation") {
+    return person.navigation;
   }
 
   return nullptr;
@@ -572,7 +634,12 @@ WorldStateNode::find_person_by_id(const WorldState &state,
 
 json WorldStateNode::object_to_json(const ObjectDescription &obj) const {
   return {
-      {"number", obj.number}, {"name", obj.name}, {"locations", obj.locations}};
+      {"number", obj.number},
+      {"name", obj.name},
+      {"locations", obj.locations},
+      {"navigation", obj.navigation},
+      {"manipulation", obj.manipulation},
+  };
 }
 
 json WorldStateNode::object_attribute_to_json(
@@ -587,6 +654,14 @@ json WorldStateNode::object_attribute_to_json(
 
   if (attribute == "locations") {
     return obj.locations;
+  }
+
+  if (attribute == "navigation") {
+    return obj.navigation;
+  }
+
+  if (attribute == "manipulation") {
+    return obj.manipulation;
   }
 
   return nullptr;

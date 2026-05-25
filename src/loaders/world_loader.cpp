@@ -95,10 +95,27 @@ WorldLoader::parse_objects(const YAML::Node &node) const {
       }
     }
 
+    std::vector<float> navigation;
+    if (object_node["navigation"] && object_node["navigation"].IsSequence()) {
+      for (const auto &coord : object_node["navigation"]) {
+        navigation.push_back(coord.as<float>());
+      }
+    }
+
+    std::vector<float> manipulation;
+    if (object_node["manipulation"] &&
+        object_node["manipulation"].IsSequence()) {
+      for (const auto &coord : object_node["manipulation"]) {
+        manipulation.push_back(coord.as<float>());
+      }
+    }
+
     ObjectDescription object{};
     object.number = number;
     object.name = name;
     object.locations = locations;
+    object.navigation = navigation;
+    object.manipulation = manipulation;
 
     objects.push_back(object);
   }
@@ -136,18 +153,36 @@ WorldLoader::parse_people(const YAML::Node &node) const {
       }
     }
 
-    const bool valid = is_valid_field(name, persons_ref_) &&
-                       is_valid_field(gender, persons_ref_) &&
-                       is_valid_field(age_group, persons_ref_) &&
-                       is_valid_field(emotion, persons_ref_) &&
-                       is_valid_field(hair_color, persons_ref_) &&
-                       is_valid_field(hair_style, persons_ref_) &&
-                       is_valid_field(shirt_color, persons_ref_) &&
-                       is_known_location(room) &&
-                       std::all_of(accessories.begin(), accessories.end(),
-                                   [&](const std::string &acc) {
-                                     return is_valid_field(acc, persons_ref_);
-                                   });
+    std::vector<std::string> order;
+    if (person_node["order"] && person_node["order"].IsSequence()) {
+      for (const auto &ord : person_node["order"]) {
+        order.push_back(ord.as<std::string>());
+      }
+    }
+
+    std::vector<float> navigation;
+    if (person_node["navigation"] && person_node["navigation"].IsSequence()) {
+      for (const auto &coord : person_node["navigation"]) {
+        navigation.push_back(coord.as<float>());
+      }
+    }
+
+    const bool valid =
+        is_valid_field(name, persons_ref_) &&
+        is_valid_field(gender, persons_ref_) &&
+        is_valid_field(age_group, persons_ref_) &&
+        is_valid_field(emotion, persons_ref_) &&
+        is_valid_field(hair_color, persons_ref_) &&
+        is_valid_field(hair_style, persons_ref_) &&
+        is_valid_field(shirt_color, persons_ref_) &&
+        is_valid_field(drink, objects_ref_) && is_known_location(room) &&
+        std::all_of(accessories.begin(), accessories.end(),
+                    [&](const std::string &acc) {
+                      return is_valid_field(acc, persons_ref_);
+                    }) &&
+        std::all_of(order.begin(), order.end(), [&](const std::string &ord) {
+          return is_valid_field(ord, objects_ref_);
+        });
 
     if (!valid) {
       continue;
@@ -165,6 +200,8 @@ WorldLoader::parse_people(const YAML::Node &node) const {
     person.drink = drink;
     person.room = room;
     person.accessories = accessories;
+    person.order = order;
+    person.navigation = navigation;
 
     persons.push_back(person);
   }

@@ -15,6 +15,8 @@ struct ObjectDescription {
   short int number{};
   std::string name{};
   std::vector<std::string> locations{};
+  std::vector<float> navigation{};
+  std::vector<float> manipulation{};
 };
 
 struct PersonDescription {
@@ -29,6 +31,8 @@ struct PersonDescription {
   std::string drink{"unknown"};
   std::string room{"unknown"};
   std::vector<std::string> accessories{};
+  std::vector<std::string> order{};
+  std::vector<float> navigation{};
 };
 
 struct WorldState {
