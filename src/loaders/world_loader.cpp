@@ -20,10 +20,26 @@ WorldState WorldLoader::build() {
       state.robot = parse_robot(node.second);
     } else if (key == "known_locations") {
       state.known_locations = parse_known_locations(node.second);
-    } else if (key == "objects") {
-      state.objects = parse_objects(node.second);
-    } else if (key == "people") {
-      state.persons = parse_people(node.second);
+    } else if (key == "cutlery") {
+      state.objects.cutlery = parse_objects(node.second);
+    } else if (key == "tableware") {
+      state.objects.tableware = parse_objects(node.second);
+    } else if (key == "trash") {
+      state.objects.trash = parse_objects(node.second);
+    } else if (key == "breakfast_items") {
+      state.objects.breakfast_items = parse_objects(node.second);
+    } else if (key == "cabinet_objects") {
+      state.objects.cabinet_objects = parse_objects(node.second);
+    } else if (key == "dishwasher_tab") {
+      state.objects.dishwasher_tab = parse_objects(node.second);
+    } else if (key == "floor_objects") {
+      state.objects.floor_objects = parse_objects(node.second);
+    } else if (key == "guest") {
+      state.people.guest = parse_people(node.second);
+    } else if (key == "host") {
+      state.people.host = parse_people(node.second);
+    } else if (key == "customer") {
+      state.people.customer = parse_people(node.second);
     }
   }
 

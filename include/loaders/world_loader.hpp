@@ -19,6 +19,17 @@ struct ObjectDescription {
   std::vector<float> manipulation{};
 };
 
+struct ObjectCategory {
+  std::vector<ObjectDescription> cutlery;
+  std::vector<ObjectDescription> tableware;
+  std::vector<ObjectDescription> trash;
+  std::vector<ObjectDescription> breakfast_items;
+  std::vector<ObjectDescription> cabinet_objects;
+  std::vector<ObjectDescription> dishwasher_tab;
+  std::vector<ObjectDescription> floor_objects;
+  std::vector<ObjectDescription> people;
+};
+
 struct PersonDescription {
   short int number{};
   std::string name{"unknown"};
@@ -35,11 +46,17 @@ struct PersonDescription {
   std::vector<float> navigation{};
 };
 
+struct PersonCategory {
+  std::vector<PersonDescription> guest;
+  std::vector<PersonDescription> host;
+  std::vector<PersonDescription> customer;
+};
+
 struct WorldState {
   RobotDescription robot{};
-  std::vector<ObjectDescription> objects{};
+  ObjectCategory objects{};
   std::vector<std::string> known_locations{};
-  std::vector<PersonDescription> persons{};
+  PersonCategory people{};
 };
 
 class WorldLoader {

@@ -1,7 +1,6 @@
 #include "knowledge_manager/knowledge_manager_node.hpp"
 
 #include <algorithm>
-#include <boost/mpl/aux_/na_fwd.hpp>
 #include <cctype>
 #include <exception>
 #include <fstream>
@@ -82,6 +81,15 @@ WorldState WorldStateNode::build_initial_state() {
 // Callbacks
 // ---------------------------------------------------------------------------
 
+// El campo `id` del request tiene el formato "<category>_<number>",
+// por ejemplo: "cutlery_1", "guest_3". La categoría también llega
+// por separado en `request->category` cuando aplica.
+//
+// Para people  → category ∈ { "guest", "host", "customer" }
+// Para objects → category ∈ { "cutlery", "tableware", "trash",
+//                              "breakfast_items", "cabinet_objects",
+//                              "dishwasher_tab", "floor_objects" }
+
 void WorldStateNode::get_world_state_callback(
     const std::shared_ptr<GetWorldState::Request> request,
     const std::shared_ptr<GetWorldState::Response> response) {
@@ -91,17 +99,21 @@ void WorldStateNode::get_world_state_callback(
 
   if (category == "robot") {
     response->json = build_robot_json(state_, attribute).dump(2);
-  } else if (category == "people") {
-    response->json = build_people_json(state_, id, attribute).dump(2);
-  } else if (category == "objects") {
-    response->json = build_objects_json(state_, id, attribute).dump(2);
+  } else if (category == "guest" || category == "host" ||
+             category == "customer") {
+    response->json = build_people_json(state_, category, id, attribute).dump(2);
+  } else if (category == "cutlery" || category == "tableware" ||
+             category == "trash" || category == "breakfast_items" ||
+             category == "cabinet_objects" || category == "dishwasher_tab" ||
+             category == "floor_objects") {
+    response->json =
+        build_objects_json(state_, category, id, attribute).dump(2);
   } else if (category == "known_locations") {
     response->json = build_locations_json(state_).dump(2);
   } else if (category == "world") {
     response->json = build_world_json(state_);
   } else {
-    RCLCPP_WARN(this->get_logger(), "Unknown category \'%s\'",
-                category.c_str());
+    RCLCPP_WARN(this->get_logger(), "Unknown category '%s'", category.c_str());
     response->json = "{}";
   }
 }
@@ -131,102 +143,101 @@ json WorldStateNode::build_robot_json(const WorldState &state,
   const auto &robot = state.robot;
 
   if (attribute.empty()) {
-    json j;
-    j["name"] = robot.name;
-    j["location"] = robot.location;
-    j["left_hand"] = robot.left_hand;
-    j["right_hand"] = robot.right_hand;
-    return j;
+    return {{"name", robot.name},
+            {"location", robot.location},
+            {"left_hand", robot.left_hand},
+            {"right_hand", robot.right_hand}};
   }
 
-  if (attribute == "name") {
+  if (attribute == "name")
     return robot.name;
-  }
-
-  if (attribute == "location") {
+  if (attribute == "location")
     return robot.location;
-  }
-
-  if (attribute == "left_hand") {
+  if (attribute == "left_hand")
     return robot.left_hand;
-  }
-
-  if (attribute == "right_hand") {
+  if (attribute == "right_hand")
     return robot.right_hand;
-  }
 
-  // Invalid attribute
   return nullptr;
 }
 
 json WorldStateNode::build_objects_json(const WorldState &state,
+                                        const std::string &category,
                                         const std::string &id,
                                         const std::string &attribute) const {
-  // Todos los objetos
+  const auto &objects = resolve_object_category(category);
+
+  // Todos los objetos de la categoría
   if (id.empty()) {
     json arr = json::array();
-    for (const auto &obj : state.objects) {
+    for (const auto &obj : objects) {
       arr.push_back(object_to_json(obj));
     }
-    return {{"objects", arr}};
+    return {{category, arr}};
   }
 
-  // Buscar objeto
+  // Buscar objeto por número relativo a la categoría
   const short int number = static_cast<short int>(std::stoi(id));
-  auto it = find_object_by_id(state, number);
-  if (it == state.objects.end()) {
+  auto it = find_object_by_id(objects, number);
+  if (it == objects.end()) {
     return nullptr;
   }
 
-  // Objeto completo
   if (attribute.empty()) {
     return object_to_json(*it);
   }
 
-  // Attributo específico
   return object_attribute_to_json(*it, attribute);
 }
 
 json WorldStateNode::build_locations_json(const WorldState &state) const {
-  json j;
-  j["known_locations"] = state.known_locations;
-  return j;
+  return {{"known_locations", state.known_locations}};
 }
 
 json WorldStateNode::build_people_json(const WorldState &state,
+                                       const std::string &category,
                                        const std::string &id,
                                        const std::string &attribute) const {
-  // Todas las personas
+  const auto &persons = resolve_person_category(category);
+
+  // Todas las personas de la categoría
   if (id.empty()) {
     json arr = json::array();
-    for (const auto &person : state.persons) {
+    for (const auto &person : persons) {
       arr.push_back(person_to_json(person));
     }
-    return {{"people", arr}};
+    return {{category, arr}};
   }
 
-  // Buscar persona
+  // Buscar persona por número relativo a la categoría
   const short int number = static_cast<short int>(std::stoi(id));
-  auto it = find_person_by_id(state, number);
-  if (it == state.persons.end()) {
+  auto it = find_person_by_id(persons, number);
+  if (it == persons.end()) {
     return nullptr;
   }
 
-  // Persona completa
   if (attribute.empty()) {
     return person_to_json(*it);
   }
 
-  // Atributo específico
   return person_attribute_to_json(*it, attribute);
 }
 
 std::string WorldStateNode::build_world_json(const WorldState &state) const {
   json j;
   j["robot"] = build_robot_json(state);
-  j["objects"] = build_objects_json(state);
   j["known_locations"] = build_locations_json(state);
-  j["people"] = build_people_json(state);
+
+  for (const std::string &cat :
+       {"cutlery", "tableware", "trash", "breakfast_items", "cabinet_objects",
+        "dishwasher_tab", "floor_objects"}) {
+    j[cat] = build_objects_json(state, cat);
+  }
+
+  for (const std::string &cat : {"guest", "host", "customer"}) {
+    j[cat] = build_people_json(state, cat);
+  }
+
   return j.dump(2);
 }
 
@@ -234,23 +245,30 @@ std::string WorldStateNode::build_world_json(const WorldState &state) const {
 // Actualización de estado en memoria
 // ---------------------------------------------------------------------------
 
+// El JSON de actualización debe incluir un campo "category" que identifique
+// la subcategoría, además de "object"/"objects" o "person"/"persons".
+// Ejemplo para objeto:  { "category": "cutlery", "object": { ... } }
+// Ejemplo para persona: { "category": "guest",   "person": { ... } }
+
 void WorldStateNode::update_world_state(const std::string &json_str) {
   const json data = json::parse(json_str);
+  const std::string category =
+      data.contains("category") ? data["category"].get<std::string>() : "";
 
   if (data.contains("robot")) {
     update_robot_state(data["robot"]);
   }
   if (data.contains("object")) {
-    update_object_state(data["object"]);
+    update_object_state(data["object"], category);
   }
   if (data.contains("objects")) {
-    update_objects_table(data["objects"]);
+    update_objects_table(data["objects"], category);
   }
   if (data.contains("person")) {
-    update_person_state(data["person"]);
+    update_person_state(data["person"], category);
   }
   if (data.contains("persons")) {
-    update_people_table(data["persons"]);
+    update_people_table(data["persons"], category);
   }
 }
 
@@ -279,29 +297,30 @@ void WorldStateNode::update_robot_state(const json &robot) {
   }
 }
 
-void WorldStateNode::update_object_state(const json &obj) {
-  short int number = 0;
+void WorldStateNode::update_object_state(const json &obj,
+                                         const std::string &category) {
+  auto &objects = resolve_object_category(category);
 
+  short int number = 0;
   if (obj.contains("number")) {
     number = obj["number"].get<short int>();
   } else {
     short int max_number = 0;
-    for (const auto &o : state_.objects) {
+    for (const auto &o : objects) {
       max_number = std::max(max_number, o.number);
     }
     number = max_number + 1;
   }
 
   auto it = std::find_if(
-      state_.objects.begin(), state_.objects.end(),
+      objects.begin(), objects.end(),
       [&](const ObjectDescription &o) { return o.number == number; });
 
-  if (it == state_.objects.end()) {
-
+  if (it == objects.end()) {
     ObjectDescription object{};
     object.number = number;
-    state_.objects.push_back(object);
-    it = std::prev(state_.objects.end());
+    objects.push_back(object);
+    it = std::prev(objects.end());
   }
 
   if (obj.contains("name")) {
@@ -309,7 +328,6 @@ void WorldStateNode::update_object_state(const json &obj) {
   }
 
   if (obj.contains("room")) {
-
     const std::string room = sym(obj["room"]);
     const bool valid =
         room == "unknown" ||
@@ -317,17 +335,15 @@ void WorldStateNode::update_object_state(const json &obj) {
     if (!valid) {
       RCLCPP_WARN(this->get_logger(),
                   "update_object_state: invalid location '%s' "
-                  "for object #%d, ignoring.",
-                  room.c_str(), number);
+                  "for object #%d in '%s', ignoring.",
+                  room.c_str(), number, category.c_str());
       return;
     }
-
     it->locations = {room};
   }
 
   if (obj.contains("navigation") && obj["navigation"].is_array()) {
     it->navigation.clear();
-
     for (const auto &coord : obj["navigation"]) {
       it->navigation.push_back(coord);
     }
@@ -335,45 +351,44 @@ void WorldStateNode::update_object_state(const json &obj) {
 
   if (obj.contains("manipulation") && obj["manipulation"].is_array()) {
     it->manipulation.clear();
-
     for (const auto &coord : obj["manipulation"]) {
       it->manipulation.push_back(coord);
     }
   }
 }
 
-void WorldStateNode::update_objects_table(const json &objects) {
-  state_.objects.clear();
+void WorldStateNode::update_objects_table(const json &objects,
+                                          const std::string &category) {
+  resolve_object_category(category).clear();
   for (const auto &obj : objects) {
-    update_object_state(obj);
+    update_object_state(obj, category);
   }
 }
 
-void WorldStateNode::update_person_state(const json &person_json) {
-  short int number = 0;
+void WorldStateNode::update_person_state(const json &person_json,
+                                         const std::string &category) {
+  auto &persons = resolve_person_category(category);
 
+  short int number = 0;
   if (person_json.contains("number")) {
     number = person_json["number"].get<short int>();
-
   } else {
     short int max_number = 0;
-
-    for (const auto &p : state_.persons) {
+    for (const auto &p : persons) {
       max_number = std::max(max_number, p.number);
     }
-
     number = max_number + 1;
   }
 
   auto it = std::find_if(
-      state_.persons.begin(), state_.persons.end(),
+      persons.begin(), persons.end(),
       [&](const PersonDescription &p) { return p.number == number; });
 
-  if (it == state_.persons.end()) {
+  if (it == persons.end()) {
     PersonDescription person{};
     person.number = number;
-    state_.persons.push_back(person);
-    it = std::prev(state_.persons.end());
+    persons.push_back(person);
+    it = std::prev(persons.end());
   }
 
   if (person_json.contains("name")) {
@@ -389,44 +404,37 @@ void WorldStateNode::update_person_state(const json &person_json) {
       it->room = room;
     } else {
       RCLCPP_WARN(this->get_logger(),
-                  "update_person_state: invalid location '%s', ignoring.",
-                  room.c_str());
+                  "update_person_state: invalid location '%s' "
+                  "for person #%d in '%s', ignoring.",
+                  room.c_str(), number, category.c_str());
     }
   }
 
   if (person_json.contains("gender")) {
     it->gender = sym(person_json["gender"]);
   }
-
   if (person_json.contains("emotion")) {
     it->emotion = sym(person_json["emotion"]);
   }
-
   if (person_json.contains("shirt_color")) {
     it->shirt_color = sym(person_json["shirt_color"]);
   }
-
   if (person_json.contains("hair_color")) {
     it->hair_color = sym(person_json["hair_color"]);
   }
-
   if (person_json.contains("hair_style")) {
     it->hair_style = sym(person_json["hair_style"]);
   }
-
   if (person_json.contains("drink")) {
     it->drink = sym(person_json["drink"]);
   }
-
   if (person_json.contains("age_group")) {
     it->age_group = sym(person_json["age_group"]);
   }
 
   if (person_json.contains("accessories") &&
       person_json["accessories"].is_array()) {
-
     it->accessories.clear();
-
     for (const auto &acc : person_json["accessories"]) {
       it->accessories.push_back(sym(acc));
     }
@@ -434,7 +442,6 @@ void WorldStateNode::update_person_state(const json &person_json) {
 
   if (person_json.contains("order") && person_json["order"].is_array()) {
     it->order.clear();
-
     for (const auto &ord : person_json["order"]) {
       it->order.push_back(sym(ord));
     }
@@ -443,17 +450,17 @@ void WorldStateNode::update_person_state(const json &person_json) {
   if (person_json.contains("navigation") &&
       person_json["navigation"].is_array()) {
     it->navigation.clear();
-
     for (const auto &coord : person_json["navigation"]) {
       it->navigation.push_back(coord);
     }
   }
 }
 
-void WorldStateNode::update_people_table(const json &persons) {
-  state_.persons.clear();
+void WorldStateNode::update_people_table(const json &persons,
+                                         const std::string &category) {
+  resolve_person_category(category).clear();
   for (const auto &p : persons) {
-    update_person_state(p);
+    update_person_state(p, category);
   }
 }
 
@@ -481,71 +488,81 @@ void WorldStateNode::save_state(const WorldState &state,
   }
   out << YAML::EndSeq;
 
-  // Objects
-  out << YAML::Key << "objects" << YAML::Value << YAML::BeginSeq;
+  // Helper lambda para serializar un vector de objetos
+  auto emit_objects = [&](const std::string &key,
+                          const std::vector<ObjectDescription> &objects) {
+    out << YAML::Key << key << YAML::Value << YAML::BeginSeq;
+    for (const auto &obj : objects) {
+      out << YAML::BeginMap;
+      out << YAML::Key << "number" << YAML::Value << obj.number;
+      out << YAML::Key << "name" << YAML::Value << obj.name;
+      out << YAML::Key << "locations" << YAML::Value << YAML::Flow
+          << YAML::BeginSeq;
+      for (const auto &loc : obj.locations)
+        out << loc;
+      out << YAML::EndSeq;
+      out << YAML::Key << "navigation" << YAML::Value << YAML::Flow
+          << YAML::BeginSeq;
+      for (const auto &coord : obj.navigation)
+        out << coord;
+      out << YAML::EndSeq;
+      out << YAML::Key << "manipulation" << YAML::Value << YAML::Flow
+          << YAML::BeginSeq;
+      for (const auto &coord : obj.manipulation)
+        out << coord;
+      out << YAML::EndSeq;
+      out << YAML::EndMap;
+    }
+    out << YAML::EndSeq;
+  };
 
-  for (const auto &obj : state.objects) {
+  emit_objects("cutlery", state.objects.cutlery);
+  emit_objects("tableware", state.objects.tableware);
+  emit_objects("trash", state.objects.trash);
+  emit_objects("breakfast_items", state.objects.breakfast_items);
+  emit_objects("cabinet_objects", state.objects.cabinet_objects);
+  emit_objects("dishwasher_tab", state.objects.dishwasher_tab);
+  emit_objects("floor_objects", state.objects.floor_objects);
 
-    out << YAML::BeginMap;
-    out << YAML::Key << "number" << YAML::Value << obj.number;
-    out << YAML::Key << "name" << YAML::Value << obj.name;
-    out << YAML::Key << "locations" << YAML::Value << YAML::Flow
-        << YAML::BeginSeq;
+  // Helper lambda para serializar un vector de personas
+  auto emit_people = [&](const std::string &key,
+                         const std::vector<PersonDescription> &persons) {
+    out << YAML::Key << key << YAML::Value << YAML::BeginSeq;
+    for (const auto &person : persons) {
+      out << YAML::BeginMap;
+      out << YAML::Key << "number" << YAML::Value << person.number;
+      out << YAML::Key << "name" << YAML::Value << person.name;
+      out << YAML::Key << "gender" << YAML::Value << person.gender;
+      out << YAML::Key << "age_group" << YAML::Value << person.age_group;
+      out << YAML::Key << "emotion" << YAML::Value << person.emotion;
+      out << YAML::Key << "hair_color" << YAML::Value << person.hair_color;
+      out << YAML::Key << "hair_style" << YAML::Value << person.hair_style;
+      out << YAML::Key << "shirt_color" << YAML::Value << person.shirt_color;
+      out << YAML::Key << "drink" << YAML::Value << person.drink;
+      out << YAML::Key << "room" << YAML::Value << person.room;
+      out << YAML::Key << "accessories" << YAML::Value << YAML::Flow
+          << YAML::BeginSeq;
+      for (const auto &acc : person.accessories)
+        out << acc;
+      out << YAML::EndSeq;
+      out << YAML::Key << "order" << YAML::Value << YAML::Flow
+          << YAML::BeginSeq;
+      for (const auto &ord : person.order)
+        out << ord;
+      out << YAML::EndSeq;
+      out << YAML::Key << "navigation" << YAML::Value << YAML::Flow
+          << YAML::BeginSeq;
+      for (const auto &coord : person.navigation)
+        out << coord;
+      out << YAML::EndSeq;
+      out << YAML::EndMap;
+    }
+    out << YAML::EndSeq;
+  };
 
-    for (const auto &loc : obj.locations) {
-      out << loc;
-    }
-    out << YAML::EndSeq;
-    out << YAML::Key << "navigation" << YAML::Value << YAML::Flow
-        << YAML::BeginSeq;
-    for (const auto &coord : obj.navigation) {
-      out << coord;
-    }
-    out << YAML::EndSeq;
-    out << YAML::Key << "manipulation" << YAML::Value << YAML::Flow
-        << YAML::BeginSeq;
-    for (const auto &coord : obj.manipulation) {
-      out << coord;
-    }
-    out << YAML::EndSeq;
-    out << YAML::EndMap;
-  }
-  out << YAML::EndSeq;
-
-  // People
-  out << YAML::Key << "people" << YAML::Value << YAML::BeginSeq;
-  for (const auto &person : state.persons) {
-    out << YAML::BeginMap;
-    out << YAML::Key << "number" << YAML::Value << person.number;
-    out << YAML::Key << "name" << YAML::Value << person.name;
-    out << YAML::Key << "gender" << YAML::Value << person.gender;
-    out << YAML::Key << "age_group" << YAML::Value << person.age_group;
-    out << YAML::Key << "emotion" << YAML::Value << person.emotion;
-    out << YAML::Key << "hair_color" << YAML::Value << person.hair_color;
-    out << YAML::Key << "hair_style" << YAML::Value << person.hair_style;
-    out << YAML::Key << "shirt_color" << YAML::Value << person.shirt_color;
-    out << YAML::Key << "drink" << YAML::Value << person.drink;
-    out << YAML::Key << "room" << YAML::Value << person.room;
-    out << YAML::Key << "accessories" << YAML::Value << YAML::Flow
-        << YAML::BeginSeq;
-    for (const auto &acc : person.accessories) {
-      out << acc;
-    }
-    out << YAML::EndSeq;
-    out << YAML::Key << "order" << YAML::Value << YAML::Flow << YAML::BeginSeq;
-    for (const auto &ord : person.order) {
-      out << ord;
-    }
-    out << YAML::EndSeq;
-    out << YAML::Key << "navigation" << YAML::Value << YAML::Flow
-        << YAML::BeginSeq;
-    for (const auto &coord : person.navigation) {
-      out << coord;
-    }
-    out << YAML::EndSeq;
-    out << YAML::EndMap;
-  }
-  out << YAML::EndSeq;
+  emit_people("guest", state.people.guest);
+  emit_people("host", state.people.host);
+  emit_people("customer", state.people.customer);
 
   out << YAML::EndMap;
 
@@ -594,83 +611,136 @@ json WorldStateNode::person_to_json(const PersonDescription &person) const {
 
 json WorldStateNode::person_attribute_to_json(
     const PersonDescription &person, const std::string &attribute) const {
-  if (attribute == "number") {
+  if (attribute == "number")
     return person.number;
-  } else if (attribute == "name") {
+  if (attribute == "name")
     return person.name;
-  } else if (attribute == "gender") {
+  if (attribute == "gender")
     return person.gender;
-  } else if (attribute == "age_group") {
+  if (attribute == "age_group")
     return person.age_group;
-  } else if (attribute == "emotion") {
+  if (attribute == "emotion")
     return person.emotion;
-  } else if (attribute == "hair_color") {
+  if (attribute == "hair_color")
     return person.hair_color;
-  } else if (attribute == "hair_style") {
+  if (attribute == "hair_style")
     return person.hair_style;
-  } else if (attribute == "shirt_color") {
-  } else if (attribute == "drink") {
+  if (attribute == "shirt_color")
+    return person.shirt_color;
+  if (attribute == "drink")
     return person.drink;
-  } else if (attribute == "room") {
+  if (attribute == "room")
     return person.room;
-  } else if (attribute == "accessories") {
+  if (attribute == "accessories")
     return person.accessories;
-  } else if (attribute == "order") {
+  if (attribute == "order")
     return person.order;
-  } else if (attribute == "navigation") {
+  if (attribute == "navigation")
     return person.navigation;
-  }
 
   return nullptr;
 }
 
+std::vector<PersonDescription> &
+WorldStateNode::resolve_person_category(const std::string &category) {
+  if (category == "guest")
+    return state_.people.guest;
+  if (category == "host")
+    return state_.people.host;
+  if (category == "customer")
+    return state_.people.customer;
+
+  throw std::invalid_argument("Unknown person category: " + category);
+}
+
+const std::vector<PersonDescription> &
+WorldStateNode::resolve_person_category(const std::string &category) const {
+  if (category == "guest")
+    return state_.people.guest;
+  if (category == "host")
+    return state_.people.host;
+  if (category == "customer")
+    return state_.people.customer;
+
+  throw std::invalid_argument("Unknown person category: " + category);
+}
+
 std::vector<PersonDescription>::const_iterator
-WorldStateNode::find_person_by_id(const WorldState &state,
+WorldStateNode::find_person_by_id(const std::vector<PersonDescription> &persons,
                                   short int number) const {
   return std::find_if(
-      state.persons.begin(), state.persons.end(),
+      persons.begin(), persons.end(),
       [&](const PersonDescription &p) { return p.number == number; });
 }
 
 json WorldStateNode::object_to_json(const ObjectDescription &obj) const {
-  return {
-      {"number", obj.number},
-      {"name", obj.name},
-      {"locations", obj.locations},
-      {"navigation", obj.navigation},
-      {"manipulation", obj.manipulation},
-  };
+  return {{"number", obj.number},
+          {"name", obj.name},
+          {"locations", obj.locations},
+          {"navigation", obj.navigation},
+          {"manipulation", obj.manipulation}};
 }
 
 json WorldStateNode::object_attribute_to_json(
     const ObjectDescription &obj, const std::string &attribute) const {
-  if (attribute == "number") {
+  if (attribute == "number")
     return obj.number;
-  }
-
-  if (attribute == "name") {
+  if (attribute == "name")
     return obj.name;
-  }
-
-  if (attribute == "locations") {
+  if (attribute == "locations")
     return obj.locations;
-  }
-
-  if (attribute == "navigation") {
+  if (attribute == "navigation")
     return obj.navigation;
-  }
-
-  if (attribute == "manipulation") {
+  if (attribute == "manipulation")
     return obj.manipulation;
-  }
 
   return nullptr;
 }
 
+std::vector<ObjectDescription> &
+WorldStateNode::resolve_object_category(const std::string &category) {
+  if (category == "cutlery")
+    return state_.objects.cutlery;
+  if (category == "tableware")
+    return state_.objects.tableware;
+  if (category == "trash")
+    return state_.objects.trash;
+  if (category == "breakfast_items")
+    return state_.objects.breakfast_items;
+  if (category == "cabinet_objects")
+    return state_.objects.cabinet_objects;
+  if (category == "dishwasher_tab")
+    return state_.objects.dishwasher_tab;
+  if (category == "floor_objects")
+    return state_.objects.floor_objects;
+
+  throw std::invalid_argument("Unknown object category: " + category);
+}
+
+const std::vector<ObjectDescription> &
+WorldStateNode::resolve_object_category(const std::string &category) const {
+  if (category == "cutlery")
+    return state_.objects.cutlery;
+  if (category == "tableware")
+    return state_.objects.tableware;
+  if (category == "trash")
+    return state_.objects.trash;
+  if (category == "breakfast_items")
+    return state_.objects.breakfast_items;
+  if (category == "cabinet_objects")
+    return state_.objects.cabinet_objects;
+  if (category == "dishwasher_tab")
+    return state_.objects.dishwasher_tab;
+  if (category == "floor_objects")
+    return state_.objects.floor_objects;
+
+  throw std::invalid_argument("Unknown object category: " + category);
+}
+
 std::vector<ObjectDescription>::const_iterator
-WorldStateNode::find_object_by_id(const WorldState &state,
-                                  const short int number) const {
+WorldStateNode::find_object_by_id(const std::vector<ObjectDescription> &objects,
+                                  short int number) const {
   return std::find_if(
-      state.objects.begin(), state.objects.end(),
+      objects.begin(), objects.end(),
       [&](const ObjectDescription &obj) { return obj.number == number; });
 }
