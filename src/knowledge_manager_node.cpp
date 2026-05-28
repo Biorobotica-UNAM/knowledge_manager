@@ -39,32 +39,16 @@ WorldStateNode::WorldStateNode() : Node("world_state_node") {
 
 void WorldStateNode::build_paths() {
   bank_path_ = ament_index_cpp::get_package_share_directory("knowledge_bank");
-  keys_path_ = bank_path_ + "/domains/";
   volatile_path_ = bank_path_ + "/runtime/";
 
-  locations_path_ = keys_path_ + "locations.yaml";
-  objects_path_ = keys_path_ + "objects.yaml";
-  people_path_ = keys_path_ + "people.yaml";
   world_path_ = volatile_path_ + "world.yaml";
   output_path_ = volatile_path_ + "runtime.yaml";
 }
 
-void WorldStateNode::build_references() {
-  locations_ref_ = DefaultLoader(locations_path_).build();
-  objects_ref_ = DefaultLoader(objects_path_).build();
-  people_ref_ = DefaultLoader(people_path_).build();
-
-  RCLCPP_INFO(
-      this->get_logger(),
-      "References loaded: %zu locations, %zu objects, %zu people descriptions.",
-      locations_ref_.size(), objects_ref_.size(), people_ref_.size());
-}
-
 WorldState WorldStateNode::build_initial_state() {
   build_paths();
-  build_references();
 
-  WorldLoader loader(world_path_, locations_ref_, objects_ref_, people_ref_);
+  WorldLoader loader(world_path_);
   WorldState state = loader.build();
 
   RCLCPP_INFO(
@@ -278,16 +262,6 @@ void WorldStateNode::update_robot_state(const json &robot) {
   }
   if (robot.contains("room")) {
     const std::string room = sym(robot["room"]);
-    const bool valid =
-        room == "unknown" ||
-        std::binary_search(locations_ref_.begin(), locations_ref_.end(), room);
-    if (valid) {
-      state_.robot.location = room;
-    } else {
-      RCLCPP_WARN(this->get_logger(),
-                  "update_robot_state: invalid location '%s', ignoring.",
-                  room.c_str());
-    }
   }
   if (robot.contains("left_hand")) {
     state_.robot.left_hand = sym(robot["left_hand"]);
@@ -329,16 +303,6 @@ void WorldStateNode::update_object_state(const json &obj,
 
   if (obj.contains("room")) {
     const std::string room = sym(obj["room"]);
-    const bool valid =
-        room == "unknown" ||
-        std::binary_search(locations_ref_.begin(), locations_ref_.end(), room);
-    if (!valid) {
-      RCLCPP_WARN(this->get_logger(),
-                  "update_object_state: invalid location '%s' "
-                  "for object #%d in '%s', ignoring.",
-                  room.c_str(), number, category.c_str());
-      return;
-    }
     it->locations = {room};
   }
 
@@ -397,17 +361,7 @@ void WorldStateNode::update_person_state(const json &person_json,
 
   if (person_json.contains("room")) {
     const std::string room = sym(person_json["room"]);
-    const bool valid =
-        room == "unknown" ||
-        std::binary_search(locations_ref_.begin(), locations_ref_.end(), room);
-    if (valid) {
-      it->room = room;
-    } else {
-      RCLCPP_WARN(this->get_logger(),
-                  "update_person_state: invalid location '%s' "
-                  "for person #%d in '%s', ignoring.",
-                  room.c_str(), number, category.c_str());
-    }
+    it->room = room;
   }
 
   if (person_json.contains("gender")) {

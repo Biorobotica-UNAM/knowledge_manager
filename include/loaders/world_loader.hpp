@@ -61,23 +61,12 @@ struct WorldState {
 
 class WorldLoader {
 public:
-  WorldLoader(const std::string &world_path,
-              const std::vector<std::string> &locations_ref,
-              const std::vector<std::string> &objects_ref,
-              const std::vector<std::string> &persons_ref);
+  WorldLoader(const std::string &world_path);
 
   WorldState build();
 
 private:
   std::string world_path_;
-  const std::vector<std::string> &locations_ref_;
-  const std::vector<std::string> &objects_ref_;
-  const std::vector<std::string> &persons_ref_;
-
-  bool is_known_location(const std::string &location) const; // acepta "unknown"
-  bool is_known_object(const std::string &object) const;     // acepta "nothing"
-  bool is_valid_field(const std::string &value,
-                      const std::vector<std::string> &ref) const;
 
   RobotDescription parse_robot(const YAML::Node &node) const;
   std::vector<std::string> parse_known_locations(const YAML::Node &node) const;

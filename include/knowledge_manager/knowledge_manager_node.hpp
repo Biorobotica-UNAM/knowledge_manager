@@ -24,7 +24,6 @@ public:
 private:
   // Inicialización
   void build_paths();
-  void build_references();
   WorldState build_initial_state();
 
   // Callbacks de servicios

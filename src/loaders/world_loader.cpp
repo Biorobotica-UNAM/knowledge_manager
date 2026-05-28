@@ -2,12 +2,8 @@
 
 #include <algorithm>
 
-WorldLoader::WorldLoader(const std::string &world_path,
-                         const std::vector<std::string> &locations_ref,
-                         const std::vector<std::string> &objects_ref,
-                         const std::vector<std::string> &persons_ref)
-    : world_path_(world_path), locations_ref_(locations_ref),
-      objects_ref_(objects_ref), persons_ref_(persons_ref) {}
+WorldLoader::WorldLoader(const std::string &world_path)
+    : world_path_(world_path) {}
 
 WorldState WorldLoader::build() {
   WorldState state{};
@@ -54,15 +50,15 @@ RobotDescription WorldLoader::parse_robot(const YAML::Node &node) const {
   }
   if (node["room"]) {
     const std::string room = node["room"].as<std::string>();
-    robot.location = is_known_location(room) ? room : "unknown";
+    robot.location = room;
   }
   if (node["left_hand"]) {
     const std::string item = node["left_hand"].as<std::string>();
-    robot.left_hand = is_known_object(item) ? item : "unknown";
+    robot.left_hand = item;
   }
   if (node["right_hand"]) {
     const std::string item = node["right_hand"].as<std::string>();
-    robot.right_hand = is_known_object(item) ? item : "unknown";
+    robot.right_hand = item;
   }
 
   return robot;
@@ -74,9 +70,7 @@ WorldLoader::parse_known_locations(const YAML::Node &node) const {
 
   for (const auto &loc : node) {
     const std::string value = loc.as<std::string>();
-    if (is_known_location(value)) {
-      locations.push_back(value);
-    }
+    locations.push_back(value);
   }
 
   return locations;
@@ -97,17 +91,11 @@ WorldLoader::parse_objects(const YAML::Node &node) const {
     const short int number = field("number", static_cast<short int>(0));
     const std::string name = field("name", std::string("unknown"));
 
-    if (!is_known_object(name)) {
-      continue;
-    }
-
     std::vector<std::string> locations;
     if (object_node["locations"] && object_node["locations"].IsSequence()) {
       for (const auto &loc : object_node["locations"]) {
         const std::string location = loc.as<std::string>();
-        if (is_known_location(location)) {
-          locations.push_back(location);
-        }
+        locations.push_back(location);
       }
     }
 
@@ -183,27 +171,6 @@ WorldLoader::parse_people(const YAML::Node &node) const {
       }
     }
 
-    const bool valid =
-        is_valid_field(name, persons_ref_) &&
-        is_valid_field(gender, persons_ref_) &&
-        is_valid_field(age_group, persons_ref_) &&
-        is_valid_field(emotion, persons_ref_) &&
-        is_valid_field(hair_color, persons_ref_) &&
-        is_valid_field(hair_style, persons_ref_) &&
-        is_valid_field(shirt_color, persons_ref_) &&
-        is_valid_field(drink, objects_ref_) && is_known_location(room) &&
-        std::all_of(accessories.begin(), accessories.end(),
-                    [&](const std::string &acc) {
-                      return is_valid_field(acc, persons_ref_);
-                    }) &&
-        std::all_of(order.begin(), order.end(), [&](const std::string &ord) {
-          return is_valid_field(ord, objects_ref_);
-        });
-
-    if (!valid) {
-      continue;
-    }
-
     PersonDescription person{};
     person.number = number;
     person.name = name;
@@ -223,17 +190,4 @@ WorldLoader::parse_people(const YAML::Node &node) const {
   }
 
   return persons;
-}
-
-bool WorldLoader::is_known_location(const std::string &location) const {
-  return location == "unknown" || is_valid_field(location, locations_ref_);
-}
-
-bool WorldLoader::is_known_object(const std::string &object) const {
-  return object == "nothing" || is_valid_field(object, objects_ref_);
-}
-
-bool WorldLoader::is_valid_field(const std::string &value,
-                                 const std::vector<std::string> &ref) const {
-  return std::binary_search(ref.begin(), ref.end(), value);
 }
