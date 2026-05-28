@@ -206,12 +206,39 @@ PhraseManagerNode::get_world_state_value(const std::string &token) const {
     return {};
   }
 
-  std::string value = future.get()->json;
+  const std::string raw = future.get()->json;
 
-  // Strip surrounding quotes if present (JSON string value)
-  if (value.size() >= 2 && value.front() == '"' && value.back() == '"') {
-    value = value.substr(1, value.size() - 2);
+  try {
+    auto parsed = nlohmann::json::parse(raw);
+
+    if (parsed.is_array()) {
+      if (parsed.empty())
+        return {};
+
+      std::vector<std::string> items;
+      for (const auto &item : parsed) {
+        items.push_back(item.is_string() ? item.get<std::string>()
+                                         : item.dump());
+      }
+
+      std::string result;
+      for (std::size_t i = 0; i < items.size(); ++i) {
+        if (i == 0)
+          result = items[i];
+        else if (i == items.size() - 1)
+          result += " and " + items[i];
+        else
+          result += ", " + items[i];
+      }
+      return result;
+    }
+
+    if (parsed.is_string())
+      return parsed.get<std::string>();
+
+    return parsed.dump();
+
+  } catch (const nlohmann::json::exception &) {
+    return raw;
   }
-
-  return value;
 }
