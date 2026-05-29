@@ -14,7 +14,6 @@
 #include <yaml-cpp/emittermanip.h>
 #include <yaml-cpp/yaml.h>
 
-#include "loaders/default_loader.hpp"
 #include "loaders/world_loader.hpp"
 
 WorldStateNode::WorldStateNode() : Node("world_state_node") {

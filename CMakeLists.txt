@@ -17,7 +17,6 @@ find_package(ament_index_cpp REQUIRED)
 add_executable(world_state_node
   src/main_world.cpp
   src/knowledge_manager_node.cpp
-  src/loaders/default_loader.cpp
   src/loaders/world_loader.cpp
 )
 
