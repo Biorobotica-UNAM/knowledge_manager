@@ -363,26 +363,8 @@ void WorldStateNode::update_person_state(const json &person_json,
     it->room = room;
   }
 
-  if (person_json.contains("gender")) {
-    it->gender = sym(person_json["gender"]);
-  }
-  if (person_json.contains("emotion")) {
-    it->emotion = sym(person_json["emotion"]);
-  }
-  if (person_json.contains("shirt_color")) {
-    it->shirt_color = sym(person_json["shirt_color"]);
-  }
-  if (person_json.contains("hair_color")) {
-    it->hair_color = sym(person_json["hair_color"]);
-  }
-  if (person_json.contains("hair_style")) {
-    it->hair_style = sym(person_json["hair_style"]);
-  }
   if (person_json.contains("drink")) {
     it->drink = sym(person_json["drink"]);
-  }
-  if (person_json.contains("age_group")) {
-    it->age_group = sym(person_json["age_group"]);
   }
 
   if (person_json.contains("accessories") &&
@@ -405,6 +387,14 @@ void WorldStateNode::update_person_state(const json &person_json,
     it->navigation.clear();
     for (const auto &coord : person_json["navigation"]) {
       it->navigation.push_back(coord);
+    }
+  }
+
+  if (person_json.contains("description") &&
+      person_json["description"].is_array()) {
+    it->description.clear();
+    for (const auto &desc : person_json["description"]) {
+      it->description.push_back(desc);
     }
   }
 }
@@ -485,12 +475,11 @@ void WorldStateNode::save_state(const WorldState &state,
       out << YAML::BeginMap;
       out << YAML::Key << "number" << YAML::Value << person.number;
       out << YAML::Key << "name" << YAML::Value << person.name;
-      out << YAML::Key << "gender" << YAML::Value << person.gender;
-      out << YAML::Key << "age_group" << YAML::Value << person.age_group;
-      out << YAML::Key << "emotion" << YAML::Value << person.emotion;
-      out << YAML::Key << "hair_color" << YAML::Value << person.hair_color;
-      out << YAML::Key << "hair_style" << YAML::Value << person.hair_style;
-      out << YAML::Key << "shirt_color" << YAML::Value << person.shirt_color;
+      out << YAML::Key << "description" << YAML::Value << YAML::Flow
+          << YAML::BeginSeq;
+      for (const auto &desc : person.description)
+        out << desc;
+      out << YAML::EndSeq;
       out << YAML::Key << "drink" << YAML::Value << person.drink;
       out << YAML::Key << "room" << YAML::Value << person.room;
       out << YAML::Key << "accessories" << YAML::Value << YAML::Flow
@@ -549,12 +538,7 @@ std::string WorldStateNode::sym(const json &value) const {
 json WorldStateNode::person_to_json(const PersonDescription &person) const {
   return {{"number", person.number},
           {"name", person.name},
-          {"gender", person.gender},
-          {"age_group", person.age_group},
-          {"emotion", person.emotion},
-          {"hair_color", person.hair_color},
-          {"hair_style", person.hair_style},
-          {"shirt_color", person.shirt_color},
+          {"description", person.description},
           {"drink", person.drink},
           {"room", person.room},
           {"accessories", person.accessories},
@@ -568,18 +552,8 @@ json WorldStateNode::person_attribute_to_json(
     return person.number;
   if (attribute == "name")
     return person.name;
-  if (attribute == "gender")
-    return person.gender;
-  if (attribute == "age_group")
-    return person.age_group;
-  if (attribute == "emotion")
-    return person.emotion;
-  if (attribute == "hair_color")
-    return person.hair_color;
-  if (attribute == "hair_style")
-    return person.hair_style;
-  if (attribute == "shirt_color")
-    return person.shirt_color;
+  if (attribute == "description")
+    return person.description;
   if (attribute == "drink")
     return person.drink;
   if (attribute == "room")

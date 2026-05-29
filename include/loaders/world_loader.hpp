@@ -33,12 +33,7 @@ struct ObjectCategory {
 struct PersonDescription {
   short int number{};
   std::string name{"unknown"};
-  std::string gender{"unknown"};
-  std::string age_group{"unknown"};
-  std::string emotion{"unknown"};
-  std::string hair_color{"unknown"};
-  std::string hair_style{"unknown"};
-  std::string shirt_color{"unknown"};
+  std::vector<std::string> description{};
   std::string drink{"unknown"};
   std::string room{"unknown"};
   std::vector<std::string> accessories{};

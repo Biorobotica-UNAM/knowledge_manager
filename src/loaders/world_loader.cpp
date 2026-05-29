@@ -1,6 +1,7 @@
 #include "loaders/world_loader.hpp"
 
 #include <algorithm>
+#include <vector>
 
 WorldLoader::WorldLoader(const std::string &world_path)
     : world_path_(world_path) {}
@@ -139,15 +140,18 @@ WorldLoader::parse_people(const YAML::Node &node) const {
     };
 
     const short int number = field("number", static_cast<short int>(0));
+
     const std::string name = field("name", std::string("unknown"));
-    const std::string gender = field("gender", std::string("unknown"));
-    const std::string age_group = field("age_group", std::string("unknown"));
-    const std::string emotion = field("emotion", std::string("unknown"));
-    const std::string hair_color = field("hair_color", std::string("unknown"));
-    const std::string hair_style = field("hair_style", std::string("unknown"));
-    const std::string shirt_color =
-        field("shirt_color", std::string("unknown"));
+
+    std::vector<std::string> description;
+    if (person_node["description"] && person_node["description"].IsSequence()) {
+      for (const auto &desc : person_node["description"]) {
+        description.push_back(desc.as<std::string>());
+      }
+    }
+
     const std::string drink = field("drink", std::string("unknown"));
+
     const std::string room = field("room", std::string("unknown"));
 
     std::vector<std::string> accessories;
@@ -174,12 +178,7 @@ WorldLoader::parse_people(const YAML::Node &node) const {
     PersonDescription person{};
     person.number = number;
     person.name = name;
-    person.gender = gender;
-    person.age_group = age_group;
-    person.emotion = emotion;
-    person.hair_color = hair_color;
-    person.hair_style = hair_style;
-    person.shirt_color = shirt_color;
+    person.description = description;
     person.drink = drink;
     person.room = room;
     person.accessories = accessories;

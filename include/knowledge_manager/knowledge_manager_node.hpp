@@ -107,11 +107,6 @@ private:
   std::string world_path_;
   std::string output_path_;
 
-  // Referencias de validación
-  std::vector<std::string> locations_ref_;
-  std::vector<std::string> objects_ref_;
-  std::vector<std::string> people_ref_;
-
   // Servicios
   rclcpp::Service<GetWorldState>::SharedPtr get_state_service_;
   rclcpp::Service<UpdateWorldState>::SharedPtr update_state_service_;
