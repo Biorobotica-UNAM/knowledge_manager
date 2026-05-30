@@ -1,0 +1,21 @@
+<?xml version="1.0"?>
+<launch>
+
+  <group>
+    <push_ros_namespace namespace="knowledge_manager"/>
+    <!-- world_state_node -->
+    <node
+      pkg="knowledge_manager"
+      exec="world_state_node"
+      name="world_state_node"
+      output="screen" />
+
+    <!-- phrase_manager_node -->
+    <node
+      pkg="knowledge_manager"
+      exec="phrase_manager_node"
+      name="phrase_manager_node"
+      output="screen" />
+  </group>
+
+</launch>
