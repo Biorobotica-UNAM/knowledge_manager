@@ -1,12 +1,13 @@
 #pragma once
 
 #include <string>
+#include <unordered_map>
 #include <vector>
 #include <yaml-cpp/yaml.h>
 
 struct RobotDescription {
   std::string name{};
-  std::string location{};
+  std::string room{};
   std::string left_hand{};
   std::string right_hand{};
 };
@@ -17,17 +18,6 @@ struct ObjectDescription {
   std::vector<std::string> locations{};
   std::vector<float> navigation{};
   std::vector<float> manipulation{};
-};
-
-struct ObjectCategory {
-  std::vector<ObjectDescription> cutlery;
-  std::vector<ObjectDescription> tableware;
-  std::vector<ObjectDescription> trash;
-  std::vector<ObjectDescription> breakfast_items;
-  std::vector<ObjectDescription> cabinet_objects;
-  std::vector<ObjectDescription> dishwasher_tab;
-  std::vector<ObjectDescription> floor_objects;
-  std::vector<ObjectDescription> people;
 };
 
 struct PersonDescription {
@@ -41,17 +31,11 @@ struct PersonDescription {
   std::vector<float> navigation{};
 };
 
-struct PersonCategory {
-  std::vector<PersonDescription> guest;
-  std::vector<PersonDescription> host;
-  std::vector<PersonDescription> customer;
-};
-
 struct WorldState {
   RobotDescription robot{};
-  ObjectCategory objects{};
   std::vector<std::string> known_locations{};
-  PersonCategory people{};
+  std::unordered_map<std::string, std::vector<ObjectDescription>> objects;
+  std::unordered_map<std::string, std::vector<PersonDescription>> people;
 };
 
 class WorldLoader {

@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <vector>
+#include <yaml-cpp/node/node.h>
 
 WorldLoader::WorldLoader(const std::string &world_path)
     : world_path_(world_path) {}
@@ -12,31 +13,22 @@ WorldState WorldLoader::build() {
 
   for (const auto &node : root) {
     const std::string key = node.first.as<std::string>();
+    const YAML::Node &value = node.second;
 
     if (key == "robot") {
-      state.robot = parse_robot(node.second);
+      state.robot = parse_robot(value);
     } else if (key == "known_locations") {
-      state.known_locations = parse_known_locations(node.second);
-    } else if (key == "cutlery") {
-      state.objects.cutlery = parse_objects(node.second);
-    } else if (key == "tableware") {
-      state.objects.tableware = parse_objects(node.second);
-    } else if (key == "trash") {
-      state.objects.trash = parse_objects(node.second);
-    } else if (key == "breakfast_items") {
-      state.objects.breakfast_items = parse_objects(node.second);
-    } else if (key == "cabinet_objects") {
-      state.objects.cabinet_objects = parse_objects(node.second);
-    } else if (key == "dishwasher_tab") {
-      state.objects.dishwasher_tab = parse_objects(node.second);
-    } else if (key == "floor_objects") {
-      state.objects.floor_objects = parse_objects(node.second);
-    } else if (key == "guest") {
-      state.people.guest = parse_people(node.second);
-    } else if (key == "host") {
-      state.people.host = parse_people(node.second);
-    } else if (key == "customer") {
-      state.people.customer = parse_people(node.second);
+      state.known_locations = parse_known_locations(value);
+    } else {
+      if (!value["type"])
+        continue;
+      const std::string type = value["type"].as<std::string>();
+
+      if (type == "object") {
+        state.objects[key] = parse_objects(value["entries"]);
+      } else if (type == "people") {
+        state.people[key] = parse_people(value["entries"]);
+      }
     }
   }
 
@@ -51,7 +43,7 @@ RobotDescription WorldLoader::parse_robot(const YAML::Node &node) const {
   }
   if (node["room"]) {
     const std::string room = node["room"].as<std::string>();
-    robot.location = room;
+    robot.room = room;
   }
   if (node["left_hand"]) {
     const std::string item = node["left_hand"].as<std::string>();
