@@ -221,6 +221,10 @@ PhraseManagerNode::get_world_state_value(const std::string &token) const {
                                          : item.dump());
       }
 
+      if (parts.size() == 3 && parts[2] == "description") {
+        return format_description(items);
+      }
+
       std::string result;
       for (std::size_t i = 0; i < items.size(); ++i) {
         if (i == 0)
@@ -241,4 +245,14 @@ PhraseManagerNode::get_world_state_value(const std::string &token) const {
   } catch (const nlohmann::json::exception &) {
     return raw;
   }
+}
+
+std::string PhraseManagerNode::format_description(
+    const std::vector<std::string> &items) const {
+  if (items.size() < 6)
+    return {};
+
+  return items[0] + " wearing " + items[1] + ", of " + items[2] +
+         " age, with " + items[3] + ", a " + items[4] + " expression" +
+         ", and " + items[5];
 }

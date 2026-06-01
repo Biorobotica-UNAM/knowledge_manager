@@ -46,6 +46,8 @@ private:
   // Queries the world state service for a single token value
   std::string get_world_state_value(const std::string &token) const;
 
+  std::string format_description(const std::vector<std::string> &items) const;
+
   // --- State ---
   PhraseMap phrases_;
   std::string phrases_dir_;
