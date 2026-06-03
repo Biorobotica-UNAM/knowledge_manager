@@ -169,7 +169,7 @@ PhraseManagerNode::get_world_state_value(const std::string &token) const {
   {
     std::stringstream ss(token);
     std::string part;
-    while (std::getline(ss, part, '.')) {
+    while (std::getline(ss, part, '_')) {
       parts.push_back(std::move(part));
     }
   }
@@ -194,8 +194,8 @@ PhraseManagerNode::get_world_state_value(const std::string &token) const {
     request->attribute = parts[1];
   } else {
     request->category = parts[0];
-    request->id = parts[1];
-    request->attribute = parts[2];
+    request->id = parts[2];
+    request->attribute = parts[1];
   }
 
   auto future = world_state_client_->async_send_request(request);
