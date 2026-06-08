@@ -32,7 +32,10 @@ WorldStateNode::WorldStateNode() : Node("world_state_node") {
 
   state_ = build_initial_state();
 
-  rclcpp::ServicesQoS qos;
+  //rclcpp::ServicesQoS qos;
+  // Guys, please. Make sure the code compiles with ROS 2 Humble too. We talked about this!!!
+  //const rclcpp::QoS qos = rclcpp::ServicesQoS();
+  const rmw_qos_profile_t qos = rmw_qos_profile_services_default;
 
   get_state_service_ = this->create_service<GetWorldState>(
       "world/get_state",
