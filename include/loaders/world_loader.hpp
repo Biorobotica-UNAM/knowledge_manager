@@ -10,6 +10,9 @@ struct RobotDescription {
   std::string room{};
   std::string left_hand{};
   std::string right_hand{};
+  std::string safe_drop_mode{};
+  std::string safe_drop_frame{};
+  std::vector<float> safe_drop_pose{};
 };
 
 struct ObjectDescription {

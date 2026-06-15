@@ -176,7 +176,10 @@ json WorldStateNode::build_robot_json(const WorldState &state,
     return {{"name", robot.name},
             {"room", robot.room},
             {"left_hand", robot.left_hand},
-            {"right_hand", robot.right_hand}};
+            {"right_hand", robot.right_hand},
+            {"safe_drop_mode", robot.safe_drop_mode},
+            {"safe_drop_frame", robot.safe_drop_frame},
+            {"safe_drop_pose", robot.safe_drop_pose}};
   }
 
   if (attribute == "name")
@@ -187,6 +190,12 @@ json WorldStateNode::build_robot_json(const WorldState &state,
     return robot.left_hand;
   if (attribute == "right_hand")
     return robot.right_hand;
+  if (attribute == "safe_drop_mode")
+    return robot.safe_drop_mode;
+  if (attribute == "safe_drop_frame")
+    return robot.safe_drop_frame;
+  if (attribute == "safe_drop_pose")
+    return robot.safe_drop_pose;
 
   return nullptr;
 }
@@ -263,6 +272,14 @@ std::string WorldStateNode::build_world_json(const WorldState &state) const {
 
 void WorldStateNode::update_robot_attribute(const std::string &attribute,
                                             const std::string &value) {
+  if (attribute == "safe_drop_pose") {
+    const json arr = json::parse(value);
+    state_.robot.safe_drop_pose.clear();
+    for (const auto &coord : arr)
+      state_.robot.safe_drop_pose.push_back(coord.get<float>());
+    return;
+  }
+
   const std::string v = normalize(value);
 
   if (attribute == "name") {
@@ -279,6 +296,14 @@ void WorldStateNode::update_robot_attribute(const std::string &attribute,
   }
   if (attribute == "right_hand") {
     state_.robot.right_hand = v;
+    return;
+  }
+  if (attribute == "safe_drop_mode") {
+    state_.robot.safe_drop_mode = v;
+    return;
+  }
+  if (attribute == "safe_drop_frame") {
+    state_.robot.safe_drop_frame = v;
     return;
   }
 
@@ -346,6 +371,15 @@ void WorldStateNode::save_state(const WorldState &state,
   out << YAML::Key << "room" << YAML::Value << state.robot.room;
   out << YAML::Key << "left_hand" << YAML::Value << state.robot.left_hand;
   out << YAML::Key << "right_hand" << YAML::Value << state.robot.right_hand;
+  out << YAML::Key << "safe_drop_mode" << YAML::Value
+      << state.robot.safe_drop_mode;
+  out << YAML::Key << "safe_drop_frame" << YAML::Value
+      << state.robot.safe_drop_frame;
+  out << YAML::Key << "safe_drop_pose" << YAML::Value << YAML::Flow
+      << YAML::BeginSeq;
+  for (const auto &c : state.robot.safe_drop_pose)
+    out << c;
+  out << YAML::EndSeq;
   out << YAML::EndMap;
 
   // Known locations

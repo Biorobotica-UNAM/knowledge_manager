@@ -53,6 +53,17 @@ RobotDescription WorldLoader::parse_robot(const YAML::Node &node) const {
     const std::string item = node["right_hand"].as<std::string>();
     robot.right_hand = item;
   }
+  if (node["safe_drop_mode"]) {
+    robot.safe_drop_mode = node["safe_drop_mode"].as<std::string>();
+  }
+  if (node["safe_drop_frame"]) {
+    robot.safe_drop_frame = node["safe_drop_frame"].as<std::string>();
+  }
+  if (node["safe_drop_pose"] && node["safe_drop_pose"].IsSequence()) {
+    for (const auto &coord : node["safe_drop_pose"]) {
+      robot.safe_drop_pose.push_back(coord.as<float>());
+    }
+  }
 
   return robot;
 }
