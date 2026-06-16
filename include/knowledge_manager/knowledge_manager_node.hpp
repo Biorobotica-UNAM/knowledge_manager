@@ -50,6 +50,11 @@ private:
                          const std::string &id = "",
                          const std::string &attribute = "") const;
 
+  json build_analytics_json(const WorldState &state,
+                            const std::string &category,
+                            const std::string &id = "",
+                            const std::string &attribute = "") const;
+
   std::string build_world_json(const WorldState &state) const;
 
   // Actualización del estado en memoria
@@ -66,6 +71,10 @@ private:
                                const std::string &id,
                                const std::string &attribute,
                                const std::string &value);
+
+  void update_analytics_attribute(const std::string &id,
+                                  const std::string &attribute,
+                                  const std::string &value);
 
   // Persistencia
   void save_state(const WorldState &state,

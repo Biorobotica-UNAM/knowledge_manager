@@ -110,6 +110,9 @@ void WorldStateNode::get_world_state_callback(
     } else if (state_.people.count(category)) {
       response->json =
           build_people_json(state_, category, id, attribute).dump(2);
+    } else if (category == "analytics") {
+      response->json =
+          build_analytics_json(state_, category, id, attribute).dump(2);
     } else {
       RCLCPP_WARN(this->get_logger(), "Unknown category '%s'",
                   category.c_str());
@@ -148,6 +151,8 @@ void WorldStateNode::update_world_state_callback(
       update_object_attribute(category, id, attribute, value);
     } else if (state_.people.count(category)) {
       update_person_attribute(category, id, attribute, value);
+    } else if (category == "analytics") {
+      update_analytics_attribute(id, attribute, value);
     } else {
       throw std::invalid_argument("Unknown category: " + category);
     }
@@ -252,6 +257,88 @@ json WorldStateNode::build_people_json(const WorldState &state,
   return person_attribute_to_json(*it, attribute);
 }
 
+json WorldStateNode::build_analytics_json(const WorldState &state,
+                                          const std::string &category,
+                                          const std::string &id,
+                                          const std::string &attribute) const {
+  const auto &a = state.analytics;
+
+  if (id.empty()) {
+    return {{"count",
+             {{"target_class", a.count.target_class},
+              {"class_count", a.count.class_count},
+              {"frame_count", a.count.frame_count},
+              {"cumulative", a.count.cumulative}}},
+            {"size",
+             {{"target_class", a.size.target_class},
+              {"filter_mode", a.size.filter_mode},
+              {"best_match", a.size.best_match},
+              {"confidence", a.size.confidence}}},
+            {"color",
+             {{"target_class", a.color.target_class},
+              {"color", a.color.color},
+              {"best_match", a.color.best_match}}},
+            {"compare",
+             {{"classes", a.compare.classes}, {"winner", a.compare.winner}}}};
+  }
+
+  if (id == "count") {
+    if (attribute.empty())
+      return {{"target_class", a.count.target_class},
+              {"class_count", a.count.class_count},
+              {"frame_count", a.count.frame_count},
+              {"cumulative", a.count.cumulative}};
+    if (attribute == "target_class")
+      return a.count.target_class;
+    if (attribute == "class_count")
+      return a.count.class_count;
+    if (attribute == "frame_count")
+      return a.count.frame_count;
+    if (attribute == "cumulative")
+      return a.count.cumulative;
+  }
+
+  if (id == "size") {
+    if (attribute.empty())
+      return {{"target_class", a.size.target_class},
+              {"filter_mode", a.size.filter_mode},
+              {"best_match", a.size.best_match},
+              {"confidence", a.size.confidence}};
+    if (attribute == "target_class")
+      return a.size.target_class;
+    if (attribute == "filter_mode")
+      return a.size.filter_mode;
+    if (attribute == "best_match")
+      return a.size.best_match;
+    if (attribute == "confidence")
+      return a.size.confidence;
+  }
+
+  if (id == "color") {
+    if (attribute.empty())
+      return {{"target_class", a.color.target_class},
+              {"color", a.color.color},
+              {"best_match", a.color.best_match}};
+    if (attribute == "target_class")
+      return a.color.target_class;
+    if (attribute == "color")
+      return a.color.color;
+    if (attribute == "best_match")
+      return a.color.best_match;
+  }
+
+  if (id == "compare") {
+    if (attribute.empty())
+      return {{"classes", a.compare.classes}, {"winner", a.compare.winner}};
+    if (attribute == "classes")
+      return a.compare.classes;
+    if (attribute == "winner")
+      return a.compare.winner;
+  }
+
+  return nullptr;
+}
+
 std::string WorldStateNode::build_world_json(const WorldState &state) const {
   json j;
   j["robot"] = build_robot_json(state);
@@ -262,6 +349,8 @@ std::string WorldStateNode::build_world_json(const WorldState &state) const {
 
   for (const auto &[cat, _] : state.people)
     j[cat] = build_people_json(state, cat);
+
+  j["analytics"] = build_analytics_json(state, "analytics", "", ""); // <--
 
   return j.dump(2);
 }
@@ -354,6 +443,76 @@ void WorldStateNode::update_person_attribute(const std::string &category,
   }
 
   apply_person_attribute(*it, attribute, value);
+}
+
+void WorldStateNode::update_analytics_attribute(const std::string &id,
+                                                const std::string &attribute,
+                                                const std::string &value) {
+  auto &a = state_.analytics;
+
+  if (id == "count") {
+    if (attribute == "target_class") {
+      a.count.target_class = value;
+      return;
+    }
+    if (attribute == "class_count") {
+      a.count.class_count = std::stoi(value);
+      return;
+    }
+    if (attribute == "frame_count") {
+      a.count.frame_count = std::stoi(value);
+      return;
+    }
+    if (attribute == "cumulative") {
+      a.count.cumulative = std::stoi(value);
+      return;
+    }
+  }
+  if (id == "size") {
+    if (attribute == "target_class") {
+      a.size.target_class = value;
+      return;
+    }
+    if (attribute == "filter_mode") {
+      a.size.filter_mode = value;
+      return;
+    }
+    if (attribute == "best_match") {
+      a.size.best_match = value;
+      return;
+    }
+    if (attribute == "confidence") {
+      a.size.confidence = std::stof(value);
+      return;
+    }
+  }
+  if (id == "color") {
+    if (attribute == "target_class") {
+      a.color.target_class = value;
+      return;
+    }
+    if (attribute == "color") {
+      a.color.color = value;
+      return;
+    }
+    if (attribute == "best_match") {
+      a.color.best_match = value;
+      return;
+    }
+  }
+  if (id == "compare") {
+    if (attribute == "classes") {
+      a.compare.classes = value;
+      return;
+    }
+    if (attribute == "winner") {
+      a.compare.winner = value;
+      return;
+    }
+  }
+
+  throw std::invalid_argument("Unknown analytics id/attribute: " + id + "/" +
+                              attribute);
 }
 
 // ---------------------------------------------------------------------------
@@ -462,6 +621,47 @@ void WorldStateNode::save_state(const WorldState &state,
 
   for (const auto &[cat, persons] : state.people)
     emit_people(cat, persons);
+
+  // Analytics
+  out << YAML::Key << "analytics" << YAML::Value << YAML::BeginMap;
+
+  out << YAML::Key << "count" << YAML::Value << YAML::BeginMap;
+  out << YAML::Key << "target_class" << YAML::Value
+      << state.analytics.count.target_class;
+  out << YAML::Key << "class_count" << YAML::Value
+      << state.analytics.count.class_count;
+  out << YAML::Key << "frame_count" << YAML::Value
+      << state.analytics.count.frame_count;
+  out << YAML::Key << "cumulative" << YAML::Value
+      << state.analytics.count.cumulative;
+  out << YAML::EndMap;
+
+  out << YAML::Key << "size" << YAML::Value << YAML::BeginMap;
+  out << YAML::Key << "target_class" << YAML::Value
+      << state.analytics.size.target_class;
+  out << YAML::Key << "filter_mode" << YAML::Value
+      << state.analytics.size.filter_mode;
+  out << YAML::Key << "best_match" << YAML::Value
+      << state.analytics.size.best_match;
+  out << YAML::Key << "confidence" << YAML::Value
+      << state.analytics.size.confidence;
+  out << YAML::EndMap;
+
+  out << YAML::Key << "color" << YAML::Value << YAML::BeginMap;
+  out << YAML::Key << "target_class" << YAML::Value
+      << state.analytics.color.target_class;
+  out << YAML::Key << "color" << YAML::Value << state.analytics.color.color;
+  out << YAML::Key << "best_match" << YAML::Value
+      << state.analytics.color.best_match;
+  out << YAML::EndMap;
+
+  out << YAML::Key << "compare" << YAML::Value << YAML::BeginMap;
+  out << YAML::Key << "classes" << YAML::Value
+      << state.analytics.compare.classes;
+  out << YAML::Key << "winner" << YAML::Value << state.analytics.compare.winner;
+  out << YAML::EndMap;
+
+  out << YAML::EndMap; // analytics
 
   out << YAML::EndMap;
 
