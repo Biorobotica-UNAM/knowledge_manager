@@ -32,7 +32,12 @@ PhraseManagerNode::PhraseManagerNode()
 
   load_phrases();
 
-  rclcpp::ServicesQoS service_qos;
+  
+  /*----------------------------------------
+  -----  Con una ch1NGasdf44444!!!!!!!  -----
+  ----------------------------------------*/
+  //rclcpp::ServicesQoS service_qos;
+  const rmw_qos_profile_t service_qos = rmw_qos_profile_services_default;
   get_phrase_service_ = this->create_service<GetPhrase>(
       "phrases/get_phrase",
       std::bind(&PhraseManagerNode::get_phrase_callback, this,
