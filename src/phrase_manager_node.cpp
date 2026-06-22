@@ -32,11 +32,10 @@ PhraseManagerNode::PhraseManagerNode()
 
   load_phrases();
 
-  
   /*----------------------------------------
   -----  Con una ch1NGasdf44444!!!!!!!  -----
   ----------------------------------------*/
-  //rclcpp::ServicesQoS service_qos;
+  // rclcpp::ServicesQoS service_qos;
   const rmw_qos_profile_t service_qos = rmw_qos_profile_services_default;
   get_phrase_service_ = this->create_service<GetPhrase>(
       "phrases/get_phrase",
@@ -166,42 +165,96 @@ std::string PhraseManagerNode::resolve_slots(const std::string &phrase) const {
 
 std::string
 PhraseManagerNode::get_world_state_value(const std::string &token) const {
-  // Token formats:
-  //   "category.attribute"        (e.g. robot.name)
-  //   "category.id.attribute"     (e.g. objects.1.name)
 
   std::vector<std::string> parts;
-  {
+
+  // -------------------------------------------------------------------------
+  // NEW FORMAT (explicit):
+  //   category:attribute:id
+  //
+  // Example:
+  //   analytics:target_class:size
+  // -------------------------------------------------------------------------
+  if (token.find(':') != std::string::npos) {
+
     std::stringstream ss(token);
     std::string part;
+
+    while (std::getline(ss, part, ':')) {
+      parts.push_back(std::move(part));
+    }
+
+    if (parts.size() != 3) {
+      RCLCPP_ERROR(this->get_logger(),
+                   "Invalid placeholder format: '%s' "
+                   "(expected category:attribute:id)",
+                   token.c_str());
+      return {};
+    }
+
+  } else {
+
+    // -----------------------------------------------------------------------
+    // LEGACY FORMAT (unchanged):
+    //   category.attribute
+    //   category.id.attribute
+    //
+    // Examples:
+    //   robot_name
+    //   guest_name_1
+    //   guest_drink_1
+    // -----------------------------------------------------------------------
+
+    std::stringstream ss(token);
+    std::string part;
+
     while (std::getline(ss, part, '_')) {
       parts.push_back(std::move(part));
     }
+
+    if (parts.size() < 2 || parts.size() > 3) {
+      RCLCPP_ERROR(this->get_logger(),
+                   "Invalid placeholder format: '%s' "
+                   "(expected cat_attr or cat_id_attr)",
+                   token.c_str());
+      return {};
+    }
   }
 
-  if (parts.size() < 2 || parts.size() > 3) {
-    RCLCPP_ERROR(this->get_logger(),
-                 "Invalid placeholder format: '%s' "
-                 "(expected 'cat.attr' or 'cat.id.attr')",
-                 token.c_str());
-    return {};
+  // -------------------------------------------------------------------------
+  // Extract semantic fields
+  // -------------------------------------------------------------------------
+  std::string category = parts[0];
+  std::string attribute;
+  std::string id;
+
+  if (token.find(':') != std::string::npos) {
+    // NEW FORMAT: category:attribute:id
+    attribute = parts[1];
+    id = parts[2];
+  } else {
+    // LEGACY FORMAT
+    if (parts.size() == 2) {
+      attribute = parts[1];
+      id = "";
+    } else {
+      attribute = parts[1];
+      id = parts[2];
+    }
   }
 
+  // -------------------------------------------------------------------------
+  // Call service
+  // -------------------------------------------------------------------------
   if (!world_state_client_->wait_for_service(std::chrono::seconds(1))) {
     RCLCPP_ERROR(this->get_logger(), "World state service not available.");
     return {};
   }
 
   auto request = std::make_shared<GetWorldState::Request>();
-  if (parts.size() == 2) {
-    request->category = parts[0];
-    request->id = "";
-    request->attribute = parts[1];
-  } else {
-    request->category = parts[0];
-    request->id = parts[2];
-    request->attribute = parts[1];
-  }
+  request->category = category;
+  request->attribute = attribute;
+  request->id = id;
 
   auto future = world_state_client_->async_send_request(request);
 
@@ -217,8 +270,9 @@ PhraseManagerNode::get_world_state_value(const std::string &token) const {
     auto parsed = nlohmann::json::parse(raw);
 
     if (parsed.is_array()) {
-      if (parsed.empty())
+      if (parsed.empty()) {
         return {};
+      }
 
       std::vector<std::string> items;
       for (const auto &item : parsed) {
@@ -226,24 +280,27 @@ PhraseManagerNode::get_world_state_value(const std::string &token) const {
                                          : item.dump());
       }
 
-      if (parts.size() == 3 && parts[2] == "description") {
+      if (attribute == "description") {
         return format_description(items);
       }
 
       std::string result;
       for (std::size_t i = 0; i < items.size(); ++i) {
-        if (i == 0)
+        if (i == 0) {
           result = items[i];
-        else if (i == items.size() - 1)
+        } else if (i == items.size() - 1) {
           result += " and " + items[i];
-        else
+        } else {
           result += ", " + items[i];
+        }
       }
+
       return result;
     }
 
-    if (parsed.is_string())
+    if (parsed.is_string()) {
       return parsed.get<std::string>();
+    }
 
     return parsed.dump();
 
