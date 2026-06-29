@@ -57,11 +57,18 @@ struct AnalyticsCompare {
   std::string winner{};
 };
 
+struct AnalyticsGesture {
+  std::string target{"person"};
+  std::string gesture{"unknown"};
+  std::string detail{};
+};
+
 struct AnalyticsState {
   AnalyticsCount count{};
   AnalyticsSize size{};
   AnalyticsColor color{};
   AnalyticsCompare compare{};
+  AnalyticsGesture gesture{};
 };
 
 struct WorldState {

@@ -66,6 +66,14 @@ WorldState WorldLoader::build() {
           state.analytics.compare.winner =
               a["compare"]["winner"].as<std::string>("");
         }
+        if (a["gesture"]) {
+          state.analytics.gesture.target =
+              a["gesture"]["target"].as<std::string>("person");
+          state.analytics.gesture.gesture =
+              a["gesture"]["gesture"].as<std::string>("unknown");
+          state.analytics.gesture.detail =
+              a["gesture"]["detail"].as<std::string>("");
+        }
       }
     }
   }

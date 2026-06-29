@@ -283,7 +283,11 @@ json WorldStateNode::build_analytics_json(const WorldState &state,
               {"color", a.color.color},
               {"best_match", a.color.best_match}}},
             {"compare",
-             {{"classes", a.compare.classes}, {"winner", a.compare.winner}}}};
+             {{"classes", a.compare.classes}, {"winner", a.compare.winner}}},
+            {"gesture",
+             {{"target", a.gesture.target},
+              {"gesture", a.gesture.gesture},
+              {"detail", a.gesture.detail}}}};
   }
 
   if (id == "count") {
@@ -338,6 +342,19 @@ json WorldStateNode::build_analytics_json(const WorldState &state,
       return a.compare.classes;
     if (attribute == "winner")
       return a.compare.winner;
+  }
+
+  if (id == "gesture") {
+    if (attribute.empty())
+      return {{"target", a.gesture.target},
+              {"gesture", a.gesture.gesture},
+              {"detail", a.gesture.detail}};
+    if (attribute == "target")
+      return a.gesture.target;
+    if (attribute == "gesture")
+      return a.gesture.gesture;
+    if (attribute == "detail")
+      return a.gesture.detail;
   }
 
   return nullptr;
@@ -514,6 +531,20 @@ void WorldStateNode::update_analytics_attribute(const std::string &id,
       return;
     }
   }
+  if (id == "gesture") {
+    if (attribute == "target") {
+      a.gesture.target = value;
+      return;
+    }
+    if (attribute == "gesture") {
+      a.gesture.gesture = value;
+      return;
+    }
+    if (attribute == "detail") {
+      a.gesture.detail = value;
+      return;
+    }
+  }
 
   throw std::invalid_argument("Unknown analytics id/attribute: " + id + "/" +
                               attribute);
@@ -663,6 +694,15 @@ void WorldStateNode::save_state(const WorldState &state,
   out << YAML::Key << "classes" << YAML::Value
       << state.analytics.compare.classes;
   out << YAML::Key << "winner" << YAML::Value << state.analytics.compare.winner;
+  out << YAML::EndMap;
+
+  out << YAML::Key << "gesture" << YAML::Value << YAML::BeginMap;
+  out << YAML::Key << "target" << YAML::Value
+      << state.analytics.gesture.target;
+  out << YAML::Key << "gesture" << YAML::Value
+      << state.analytics.gesture.gesture;
+  out << YAML::Key << "detail" << YAML::Value
+      << state.analytics.gesture.detail;
   out << YAML::EndMap;
 
   out << YAML::EndMap; // analytics
