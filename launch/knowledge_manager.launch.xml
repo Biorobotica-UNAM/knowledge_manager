@@ -11,11 +11,11 @@
       output="screen" />
 
     <!-- phrase_manager_node -->
-    <node
-      pkg="knowledge_manager"
-      exec="phrase_manager_node"
-      name="phrase_manager_node"
-      output="screen" />
+    <!-- <node -->
+    <!--   pkg="knowledge_manager" -->
+    <!--   exec="phrase_manager_node" -->
+    <!--   name="phrase_manager_node" -->
+    <!--   output="screen" /> -->
   </group>
 
 </launch>

@@ -8,16 +8,24 @@ endif()
 # Dependencies
 find_package(ament_cmake REQUIRED)
 find_package(rclcpp REQUIRED)
-find_package(knowledge_interfaces REQUIRED)
-find_package(yaml-cpp REQUIRED)
-find_package(nlohmann_json REQUIRED)
 find_package(ament_index_cpp REQUIRED)
+ find_package(knowledge_interfaces REQUIRED)  # <- descomenta cuando exista ese paquete
+# find_package(yaml-cpp REQUIRED)              # <- descomenta cuando uses InitialStateLoader/CategoryCatalog
 
-# ── world_state_node ──────────────────────────────────────────────────────────
+# ── world_state_node ────────────────────────────────────────────────
+
+set(DOMAIN_SOURCES
+  src/domain/known_location.cpp
+  src/domain/manipulable_object.cpp
+  src/domain/person.cpp
+  src/domain/physical_description.cpp
+  src/domain/pose3d.cpp
+  src/domain/robot.cpp
+)
+
 add_executable(world_state_node
-  src/main_world.cpp
-  src/knowledge_manager_node.cpp
-  src/loaders/world_loader.cpp
+  src/main.cpp
+  ${DOMAIN_SOURCES}
 )
 
 target_include_directories(world_state_node PUBLIC
@@ -25,56 +33,25 @@ target_include_directories(world_state_node PUBLIC
   $<INSTALL_INTERFACE:include/${PROJECT_NAME}>
 )
 
-target_compile_features(world_state_node PUBLIC c_std_99 cxx_std_17)
+target_compile_features(world_state_node PUBLIC cxx_std_17)
 
 ament_target_dependencies(world_state_node
   rclcpp
-  knowledge_interfaces
   ament_index_cpp
 )
 
-target_link_libraries(world_state_node
-  yaml-cpp
-)
-
-# ── phrase_manager_node ───────────────────────────────────────────────────────
-add_executable(phrase_manager_node
-  src/main_phrase.cpp
-  src/phrase_manager_node.cpp
-  src/loaders/phrase_loader.cpp
-)
-
-target_include_directories(phrase_manager_node PUBLIC
-  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
-  $<INSTALL_INTERFACE:include/${PROJECT_NAME}>
-)
-
-target_compile_features(phrase_manager_node PUBLIC c_std_99 cxx_std_17)
-
-ament_target_dependencies(phrase_manager_node
-  rclcpp
-  knowledge_interfaces
-  ament_index_cpp
-)
-
-target_link_libraries(phrase_manager_node
-  yaml-cpp
-)
-
-# ── Install executables ───────────────────────────────────────────────────────
+# ── Install ──────────────────────────────────────────────────────────
 install(TARGETS
   world_state_node
-  phrase_manager_node
   DESTINATION lib/${PROJECT_NAME}
 )
 
-# ── Install launch files ──────────────────────────────────────────────────────
 install(
   DIRECTORY launch
   DESTINATION share/${PROJECT_NAME}
 )
 
-# ── Testing ───────────────────────────────────────────────────────────────────
+# ── Testing ──────────────────────────────────────────────────────────
 if(BUILD_TESTING)
   find_package(ament_lint_auto REQUIRED)
   set(ament_cmake_copyright_FOUND TRUE)
