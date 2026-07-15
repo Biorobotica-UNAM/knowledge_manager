@@ -9,8 +9,8 @@ endif()
 find_package(ament_cmake REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(ament_index_cpp REQUIRED)
- find_package(knowledge_interfaces REQUIRED)  # <- descomenta cuando exista ese paquete
-# find_package(yaml-cpp REQUIRED)              # <- descomenta cuando uses InitialStateLoader/CategoryCatalog
+find_package(knowledge_interfaces REQUIRED)
+find_package(yaml-cpp REQUIRED)
 
 # ── world_state_node ────────────────────────────────────────────────
 
@@ -23,9 +23,14 @@ set(DOMAIN_SOURCES
   src/domain/robot.cpp
 )
 
+set(CONFIG_SOURCES
+  src/config/object_category.cpp
+)
+
 add_executable(world_state_node
   src/main.cpp
   ${DOMAIN_SOURCES}
+  ${CONFIG_SOURCES}
 )
 
 target_include_directories(world_state_node PUBLIC
@@ -38,6 +43,11 @@ target_compile_features(world_state_node PUBLIC cxx_std_17)
 ament_target_dependencies(world_state_node
   rclcpp
   ament_index_cpp
+  yaml-cpp
+)
+
+target_link_libraries(world_state_node
+  yaml-cpp
 )
 
 # ── Install ──────────────────────────────────────────────────────────
