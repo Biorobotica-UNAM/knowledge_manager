@@ -2,7 +2,9 @@
 
 #include "knowledge_manager/domain/known_location.hpp"
 #include "knowledge_manager/domain/manipulable_object.hpp"
+#include "knowledge_manager/domain/robot_hand.hpp"
 
+#include <array>
 #include <optional>
 #include <string>
 
@@ -19,17 +21,13 @@ public:
   KnownLocation getKnownLocation() const;
   void setKnownLocation(const KnownLocation &knownLocation);
 
-  std::optional<ManipulableObject> getRightArmObject() const;
-  void setRightArmObject(const std::optional<ManipulableObject> &object);
-
-  std::optional<ManipulableObject> getLeftArmObject() const;
-  void setLeftArmObject(const std::optional<ManipulableObject> &object);
+  std::optional<ManipulableObject> getObjectInHand(RobotHand hand) const;
+  void setObjectInHand(RobotHand hand, std::optional<ManipulableObject> object);
 
 private:
   std::string name_;
   KnownLocation knownLocation_;
-  std::optional<ManipulableObject> rightArmObject_;
-  std::optional<ManipulableObject> leftArmObject_;
+  std::array<std::optional<ManipulableObject>, 2> handObjects_;
 };
 
 } // namespace knowledge_manager::domain

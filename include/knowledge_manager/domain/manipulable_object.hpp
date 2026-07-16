@@ -1,6 +1,6 @@
 #pragma once
 
-#include "knowledge_manager/domain/known_location.hpp"
+#include "knowledge_manager/domain/object_ownership.hpp"
 #include "knowledge_manager/domain/pose3d.hpp"
 
 #include <optional>
@@ -12,7 +12,7 @@ class ManipulableObject {
 public:
   ManipulableObject();
   ManipulableObject(std::string name, std::string category,
-                    KnownLocation knownLocation);
+                    ObjectOwnership ownership);
 
   std::string getName() const;
   void setName(const std::string &name);
@@ -20,8 +20,8 @@ public:
   std::string getCategory() const;
   void setCategory(const std::string &category);
 
-  KnownLocation getKnownLocation() const;
-  void setKnownLocation(const KnownLocation &knownLocation);
+  ObjectOwnership getOwnership() const;
+  void setOwnership(const ObjectOwnership &ownership);
 
   std::optional<Pose3D> getNavigablePose() const;
   void setNavigablePose(const Pose3D &pose);
@@ -32,7 +32,7 @@ public:
 private:
   std::string name_;
   std::string category_;
-  KnownLocation knownLocation_; // siempre existe -> composición por valor
+  ObjectOwnership ownership_; // siempre existe -> composición por valor
   std::optional<Pose3D> navigablePose_; // puede no existir -> optional
   std::optional<Pose3D> graspPose_;     // puede no existir -> optional
 };

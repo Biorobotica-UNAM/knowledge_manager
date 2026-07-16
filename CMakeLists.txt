@@ -17,6 +17,7 @@ find_package(yaml-cpp REQUIRED)
 set(DOMAIN_SOURCES
   src/domain/known_location.cpp
   src/domain/manipulable_object.cpp
+  src/domain/object_ownership.cpp
   src/domain/person.cpp
   src/domain/physical_description.cpp
   src/domain/pose3d.cpp
