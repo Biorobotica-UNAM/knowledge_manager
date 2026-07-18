@@ -1,9 +1,20 @@
--- schema.sql (v2)
+-- schema.sql (v3)
 -- SQLite schema for the Justina knowledge_bank world-state database.
--- Incorporates: unified object_state (exclusive-arc ownership),
--- category tables, dropped accessories table (folded into
--- person_description.accessories_phrase), person_order -> object FK,
--- nullable person.location_name, robot as a singleton table.
+-- v3 changes from v2:
+--   - object.name is now globally UNIQUE (was UNIQUE per category),
+--     matching the domain's assumption that ManipulableObject.name
+--     alone is identity (KnowledgeRepository.loadObjectByName(String)
+--     has no category parameter, so it must be unambiguous).
+--   - person.name is now UNIQUE, matching ObjectOwnership.heldByPerson
+--     using a plain person name as identity.
+--   - person.favorite_drink default changed from 'unknown' to '' to
+--     match the domain contract ("empty otherwise", not "unknown").
+--
+-- Every CREATE TABLE below uses IF NOT EXISTS so that
+-- KnowledgeRepository::ensureSchema() is idempotent: it can safely
+-- run every time the process starts, including after a restart
+-- against an already-initialized database file, without failing on
+-- "table already exists".
 --
 -- OBJECT_TYPICAL_LOCATION (static "where objects are usually found",
 -- for GPSR search-without-a-hint tasks) intentionally omitted for now.
@@ -16,7 +27,7 @@ PRAGMA foreign_keys = ON;
 -- POSE_3D
 -- Shared pose table referenced by known_location, object, person, etc.
 -- ---------------------------------------------------------------------
-CREATE TABLE pose_3d (
+CREATE TABLE IF NOT EXISTS pose_3d (
     id      INTEGER PRIMARY KEY AUTOINCREMENT,
     x       REAL NOT NULL DEFAULT 0.0,
     y       REAL NOT NULL DEFAULT 0.0,
@@ -32,7 +43,7 @@ CREATE TABLE pose_3d (
 -- name is the natural key (matches how locations are referred to
 -- everywhere else: phrases, dictionaries, YAML seeds).
 -- ---------------------------------------------------------------------
-CREATE TABLE known_location (
+CREATE TABLE IF NOT EXISTS known_location (
     name        TEXT PRIMARY KEY,
     pose_id     INTEGER REFERENCES pose_3d(id) ON DELETE SET NULL
 );
@@ -42,7 +53,7 @@ CREATE TABLE known_location (
 -- Singleton table (CHECK id = 1 enforces a single row).
 -- left/right hand are NOT columns here anymore -- see object_state.
 -- ---------------------------------------------------------------------
-CREATE TABLE robot (
+CREATE TABLE IF NOT EXISTS robot (
     id              INTEGER PRIMARY KEY CHECK (id = 1),
     name            TEXT NOT NULL,
     location_name   TEXT REFERENCES known_location(name) ON DELETE SET NULL
@@ -51,29 +62,31 @@ CREATE TABLE robot (
 -- ---------------------------------------------------------------------
 -- OBJECT_CATEGORY / PERSON_CATEGORY
 -- ---------------------------------------------------------------------
-CREATE TABLE object_category (
+CREATE TABLE IF NOT EXISTS object_category (
     id      INTEGER PRIMARY KEY AUTOINCREMENT,
     name    TEXT NOT NULL UNIQUE
 );
 
-CREATE TABLE person_category (
+CREATE TABLE IF NOT EXISTS person_category (
     id      INTEGER PRIMARY KEY AUTOINCREMENT,
     name    TEXT NOT NULL UNIQUE
 );
 
 -- ---------------------------------------------------------------------
 -- OBJECT
+-- name is globally unique: the domain (ManipulableObject.getName(),
+-- KnowledgeRepository.loadObjectByName(String)) treats name alone as
+-- identity, with no category disambiguation.
 -- ---------------------------------------------------------------------
-CREATE TABLE object (
+CREATE TABLE IF NOT EXISTS object (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,
-    name            TEXT NOT NULL,
+    name            TEXT NOT NULL UNIQUE,
     category_id     INTEGER NOT NULL REFERENCES object_category(id) ON DELETE RESTRICT,
     nav_pose_id     INTEGER REFERENCES pose_3d(id) ON DELETE SET NULL,
-    manip_pose_id   INTEGER REFERENCES pose_3d(id) ON DELETE SET NULL,
-    UNIQUE (category_id, name)
+    manip_pose_id   INTEGER REFERENCES pose_3d(id) ON DELETE SET NULL
 );
 
-CREATE INDEX idx_object_category ON object(category_id);
+CREATE INDEX IF NOT EXISTS idx_object_category ON object(category_id);
 
 -- ---------------------------------------------------------------------
 -- PERSON_DESCRIPTION
@@ -81,7 +94,7 @@ CREATE INDEX idx_object_category ON object(category_id);
 -- (e.g. "with glasses and a hat" / "no accessories") since the
 -- structured accessories list is never queried independently.
 -- ---------------------------------------------------------------------
-CREATE TABLE person_description (
+CREATE TABLE IF NOT EXISTS person_description (
     id                  INTEGER PRIMARY KEY AUTOINCREMENT,
     gender              TEXT,
     clothes             TEXT,
@@ -93,20 +106,24 @@ CREATE TABLE person_description (
 
 -- ---------------------------------------------------------------------
 -- PERSON
--- location_name is nullable: a person can be detected before their
--- room is known.
+-- name is globally unique, matching ObjectOwnership.heldByPerson(name)
+-- and KnowledgeRepository.loadPersonByName(String) using name alone
+-- as identity. location_name is nullable: a person can be detected
+-- before their room is known. favorite_drink defaults to '' (empty),
+-- not 'unknown', per Person.getFavoriteDrink()'s contract ("empty
+-- otherwise" when personType isn't guest).
 -- ---------------------------------------------------------------------
-CREATE TABLE person (
+CREATE TABLE IF NOT EXISTS person (
     id                  INTEGER PRIMARY KEY AUTOINCREMENT,
-    name                TEXT NOT NULL DEFAULT 'unknown',
+    name                TEXT NOT NULL UNIQUE,
     category_id         INTEGER NOT NULL REFERENCES person_category(id) ON DELETE RESTRICT,
     description_id      INTEGER REFERENCES person_description(id) ON DELETE SET NULL,
-    favorite_drink      TEXT NOT NULL DEFAULT 'unknown',
+    favorite_drink      TEXT NOT NULL DEFAULT '',
     location_name       TEXT REFERENCES known_location(name) ON DELETE SET NULL,
     nav_pose_id         INTEGER REFERENCES pose_3d(id) ON DELETE SET NULL
 );
 
-CREATE INDEX idx_person_category ON person(category_id);
+CREATE INDEX IF NOT EXISTS idx_person_category ON person(category_id);
 
 -- ---------------------------------------------------------------------
 -- OBJECT_STATE
@@ -114,7 +131,7 @@ CREATE INDEX idx_person_category ON person(category_id);
 -- a known_location, a person, or one of the robot's hands.
 -- 1:1 with object (object_id is both PK and FK).
 -- ---------------------------------------------------------------------
-CREATE TABLE object_state (
+CREATE TABLE IF NOT EXISTS object_state (
     object_id           INTEGER PRIMARY KEY REFERENCES object(id) ON DELETE CASCADE,
     location_name       TEXT REFERENCES known_location(name) ON DELETE SET NULL,
     held_by_person_id   INTEGER REFERENCES person(id) ON DELETE SET NULL,
@@ -126,20 +143,20 @@ CREATE TABLE object_state (
     )
 );
 
-CREATE INDEX idx_object_state_location ON object_state(location_name);
-CREATE INDEX idx_object_state_person   ON object_state(held_by_person_id);
+CREATE INDEX IF NOT EXISTS idx_object_state_location ON object_state(location_name);
+CREATE INDEX IF NOT EXISTS idx_object_state_person   ON object_state(held_by_person_id);
 
 -- ---------------------------------------------------------------------
 -- PERSON_ORDER
 -- References the object catalog by FK instead of a free-text item
 -- name, so an order can never point at a nonexistent object.
 -- ---------------------------------------------------------------------
-CREATE TABLE person_order (
+CREATE TABLE IF NOT EXISTS person_order (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
     person_id   INTEGER NOT NULL REFERENCES person(id) ON DELETE CASCADE,
     object_id   INTEGER NOT NULL REFERENCES object(id) ON DELETE RESTRICT,
     seq         INTEGER NOT NULL DEFAULT 0
 );
 
-CREATE INDEX idx_person_order_person ON person_order(person_id);
-CREATE INDEX idx_person_order_object ON person_order(object_id);
+CREATE INDEX IF NOT EXISTS idx_person_order_person ON person_order(person_id);
+CREATE INDEX IF NOT EXISTS idx_person_order_object ON person_order(object_id);

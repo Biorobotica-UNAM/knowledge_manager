@@ -12,7 +12,15 @@ void ObjectCategory::loadFromFile(const std::string &path) {
 
   YAML::Node root = YAML::LoadFile(path);
 
-  // Solo interesan las llaves de priner nivel (drink, fruits, ...)
+  // El archivo .yaml tiene que tener una estructura del tipo:
+  // categroia1:
+  //    -obj1
+  //    -obj2
+  // categroia2:
+  //    -obj1
+  //    -obj2
+
+  // Solo interesan las llaves de primer nivel (drink, fruits, ...)
   for (YAML::const_iterator it = root.begin(); it != root.end(); ++it) {
     validCategories_.push_back(it->first.as<std::string>());
   }
