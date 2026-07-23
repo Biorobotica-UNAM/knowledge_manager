@@ -30,7 +30,13 @@ set(SQLITECPP_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
 set(SQLITECPP_BUILD_TESTS OFF CACHE BOOL "" FORCE)
 FetchContent_MakeAvailable(SQLiteCpp)
 
-# ── world_state_node ────────────────────────────────────────────────
+# ── knowledge_manager_core (library, shared by the node and tests) ──
+# Domain, config, and persistence sources are built once as a static
+# library instead of being compiled directly into world_state_node.
+# This lets test executables link against the exact same object code
+# without also pulling in main.cpp or duplicating the compile step --
+# a test should be able to isolate the piece it exercises (e.g.
+# KnowledgeRepository) without depending on the whole node.
 set(DOMAIN_SOURCES
   src/domain/known_location.cpp
   src/domain/manipulable_object.cpp
@@ -49,29 +55,42 @@ set(PERSISTENCE_SOURCES
   src/persistence/knowledge_repository.cpp
 )
 
-add_executable(world_state_node
-  src/main.cpp
+add_library(knowledge_manager_core
   ${DOMAIN_SOURCES}
   ${CONFIG_SOURCES}
   ${PERSISTENCE_SOURCES}
 )
 
-target_include_directories(world_state_node PUBLIC
+target_include_directories(knowledge_manager_core PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
   $<INSTALL_INTERFACE:include/${PROJECT_NAME}>
+)
+
+target_compile_features(knowledge_manager_core PUBLIC cxx_std_17)
+
+ament_target_dependencies(knowledge_manager_core
+  ament_index_cpp
+  yaml-cpp
+)
+
+target_link_libraries(knowledge_manager_core
+  yaml-cpp
+  SQLiteCpp
+)
+
+# ── world_state_node ────────────────────────────────────────────────
+add_executable(world_state_node
+  src/main.cpp
 )
 
 target_compile_features(world_state_node PUBLIC cxx_std_17)
 
 ament_target_dependencies(world_state_node
   rclcpp
-  ament_index_cpp
-  yaml-cpp
 )
 
 target_link_libraries(world_state_node
-  yaml-cpp
-  SQLiteCpp
+  knowledge_manager_core
 )
 
 # ── Install ──────────────────────────────────────────────────────────
@@ -99,6 +118,26 @@ if(BUILD_TESTING)
   set(ament_cmake_copyright_FOUND TRUE)
   set(ament_cmake_cpplint_FOUND TRUE)
   ament_lint_auto_find_test_dependencies()
+
+  # ament_add_gtest compiles the given source as its own executable,
+  # linked against GoogleTest (which provides its own main()), and
+  # registers it with CTest so `colcon test` discovers and runs it
+  # automatically. Each call declares ONE test executable; add another
+  # ament_add_gtest(...) block per new test file as the suite grows.
+  find_package(ament_cmake_gtest REQUIRED)
+
+  ament_add_gtest(test_knowledge_repository
+    test/test_knowledge_repository.cpp
+  )
+  target_link_libraries(test_knowledge_repository
+    knowledge_manager_core
+  )
+  # Gives the test an absolute, always-correct path to schema.sql,
+  # regardless of the working directory ctest/colcon test invokes the
+  # binary from.
+  target_compile_definitions(test_knowledge_repository PRIVATE
+    KNOWLEDGE_MANAGER_SCHEMA_PATH="${CMAKE_CURRENT_SOURCE_DIR}/schema.sql"
+  )
 endif()
 
 ament_package()
