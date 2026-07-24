@@ -3,11 +3,14 @@
 #include <algorithm>
 #include <yaml-cpp/yaml.h>
 
-namespace knowledge_manager::config {
+namespace knowledge_manager::config
+{
 
-ObjectCategory::ObjectCategory() : validCategories_() {}
+ObjectCategory::ObjectCategory()
+: validCategories_() {}
 
-void ObjectCategory::loadFromFile(const std::string &path) {
+void ObjectCategory::loadFromFile(const std::string & path)
+{
   validCategories_.clear();
 
   YAML::Node root = YAML::LoadFile(path);
@@ -26,12 +29,14 @@ void ObjectCategory::loadFromFile(const std::string &path) {
   }
 }
 
-bool ObjectCategory::isValid(const std::string &category) const {
+bool ObjectCategory::isValid(const std::string & category) const
+{
   return std::find(validCategories_.begin(), validCategories_.end(),
                    category) != validCategories_.end();
 }
 
-std::vector<std::string> ObjectCategory::getValidCategories() const {
+std::vector<std::string> ObjectCategory::getValidCategories() const
+{
   return validCategories_;
 }
 

@@ -14,7 +14,8 @@
 using namespace knowledge_manager::domain;
 using namespace knowledge_manager::persistence;
 
-namespace {
+namespace
+{
 
 // Minimal Logger for tests: writes to stdout/stderr like the
 // production ConsoleLogger, kept local to this test file so the test
@@ -22,13 +23,16 @@ namespace {
 // elsewhere in the codebase.
 class TestLogger : public Logger {
 public:
-  void error(const std::string &message) override {
+  void error(const std::string & message) override
+  {
     std::fprintf(stderr, "[ERROR] %s\n", message.c_str());
   }
-  void warn(const std::string &message) override {
+  void warn(const std::string & message) override
+  {
     std::fprintf(stderr, "[WARN] %s\n", message.c_str());
   }
-  void info(const std::string &message) override {
+  void info(const std::string & message) override
+  {
     std::fprintf(stdout, "[INFO] %s\n", message.c_str());
   }
 };
@@ -40,14 +44,16 @@ public:
 // -- one test's data never leaks into the next.
 class KnowledgeRepositoryTest : public ::testing::Test {
 protected:
-  void SetUp() override {
+  void SetUp() override
+  {
     dbPath_ = "/tmp/kb_gtest.db";
     std::remove(dbPath_.c_str());
     repo_ =
-        std::make_unique<KnowledgeRepository>(dbPath_, schemaPath_, logger_);
+      std::make_unique<KnowledgeRepository>(dbPath_, schemaPath_, logger_);
   }
 
-  void TearDown() override {
+  void TearDown() override
+  {
     repo_.reset(); // close the connection before removing the file
     std::remove(dbPath_.c_str());
   }
@@ -91,7 +97,7 @@ TEST_F(KnowledgeRepositoryTest, SavedObjectAtLocation_RoundTripsOwnership) {
   repo_->saveKnownLocation(kitchen);
 
   ManipulableObject apple("apple", "fruit",
-                          ObjectOwnership::atLocation("kitchen"));
+    ObjectOwnership::atLocation("kitchen"));
   repo_->saveObject(apple);
 
   auto loaded = repo_->loadObjectByName("apple");
@@ -103,7 +109,7 @@ TEST_F(KnowledgeRepositoryTest, SavedObjectAtLocation_RoundTripsOwnership) {
 
 TEST_F(KnowledgeRepositoryTest, SavedObjectHeldByRobot_RoundTripsOwnership) {
   ManipulableObject spoon("spoon", "cutlery",
-                          ObjectOwnership::heldByRobot(RobotHand::RIGHT));
+    ObjectOwnership::heldByRobot(RobotHand::RIGHT));
   repo_->saveObject(spoon);
 
   auto loaded = repo_->loadObjectByName("spoon");
@@ -149,7 +155,7 @@ TEST_F(KnowledgeRepositoryTest, DeleteObject_RemovesIt) {
 TEST_F(KnowledgeRepositoryTest,
        SaveObject_UnknownPersonOwner_ThrowsRepositoryException) {
   ManipulableObject ghostOwned(
-      "ghost_item", "misc", ObjectOwnership::heldByPerson("NobodyByThisName"));
+    "ghost_item", "misc", ObjectOwnership::heldByPerson("NobodyByThisName"));
   EXPECT_THROW(repo_->saveObject(ghostOwned), RepositoryException);
 }
 
@@ -202,7 +208,7 @@ TEST_F(KnowledgeRepositoryTest, DeletePerson_RemovesThem) {
 TEST_F(KnowledgeRepositoryTest, SavedRobot_RoundTripsStateAndHeldObjects) {
   KnownLocation kitchen("kitchen", Pose3D());
   ManipulableObject spoon("spoon", "cutlery",
-                          ObjectOwnership::heldByRobot(RobotHand::RIGHT));
+    ObjectOwnership::heldByRobot(RobotHand::RIGHT));
 
   Robot robot("Justina", kitchen);
   robot.setObjectInHand(RobotHand::RIGHT, spoon);

@@ -18,11 +18,13 @@
 // the "deep module, narrow interface" principle (A Philosophy of
 // Software Design): the interface below is small; all the complexity
 // of SQL, joins, and exclusive-arc reconciliation lives in the .cpp.
-namespace SQLite {
+namespace SQLite
+{
 class Database;
 }
 
-namespace knowledge_manager::persistence {
+namespace knowledge_manager::persistence
+{
 
 /// Gives the illusion of an in-memory collection of Robot,
 /// ManipulableObject, and Person instances, while hiding that they
@@ -53,13 +55,14 @@ public:
   /// initialized database, via "CREATE TABLE IF NOT EXISTS"). logger
   /// is used to record infrastructure-level events; it is expected to
   /// outlive this repository.
-  KnowledgeRepository(const std::string &dbPath, const std::string &schemaPath,
-                      Logger &logger);
+  KnowledgeRepository(
+    const std::string & dbPath, const std::string & schemaPath,
+    Logger & logger);
 
   // Not copyable: a KnowledgeRepository owns a single underlying
   // database connection, which should not be silently duplicated.
   KnowledgeRepository(const KnowledgeRepository &) = delete;
-  KnowledgeRepository &operator=(const KnowledgeRepository &) = delete;
+  KnowledgeRepository & operator=(const KnowledgeRepository &) = delete;
 
   ~KnowledgeRepository();
 
@@ -69,7 +72,7 @@ public:
   /// any previously stored state (there is only ever one robot).
   /// Whichever hand holds an object, if any, is reflected in that
   /// object's own ObjectOwnership when it is separately loaded.
-  void saveRobot(const domain::Robot &robot);
+  void saveRobot(const domain::Robot & robot);
 
   /// Reconstructs and returns the robot's state from the database,
   /// including resolving which ManipulableObject, if any, each hand
@@ -81,55 +84,55 @@ public:
   /// Inserts or updates a manipulable object in the database,
   /// including persisting its current ObjectOwnership (location,
   /// person, or robot hand) as the object's exclusive-arc state.
-  void saveObject(const domain::ManipulableObject &object);
+  void saveObject(const domain::ManipulableObject & object);
 
   /// Retrieves a manipulable object by name, reconstructing its
   /// current ObjectOwnership from the exclusive-arc state. Returns
   /// std::nullopt if no object exists with that name.
   std::optional<domain::ManipulableObject>
-  loadObjectByName(const std::string &name);
+  loadObjectByName(const std::string & name);
 
   /// Retrieves all manipulable objects belonging to the given
   /// category, each with its current ObjectOwnership resolved.
   std::vector<domain::ManipulableObject>
-  loadObjectsByCategory(const std::string &category);
+  loadObjectsByCategory(const std::string & category);
 
   /// Removes a manipulable object from the database by name.
-  void deleteObject(const std::string &name);
+  void deleteObject(const std::string & name);
 
   // -- Person ----------------------------------------------------------
 
   /// Inserts or updates a person in the database.
-  void savePerson(const domain::Person &person);
+  void savePerson(const domain::Person & person);
 
   /// Retrieves a person by name. Returns std::nullopt if no person
   /// exists with that name.
-  std::optional<domain::Person> loadPersonByName(const std::string &name);
+  std::optional<domain::Person> loadPersonByName(const std::string & name);
 
   /// Retrieves all persons of the given type (e.g. all guests).
   std::vector<domain::Person> loadPersonsByType(domain::PersonType type);
 
   /// Removes a person from the database by name.
-  void deletePerson(const std::string &name);
+  void deletePerson(const std::string & name);
 
   // -- KnownLocation -----------------------------------------------
 
   /// Inserts or updates a known location in the database.
-  void saveKnownLocation(const domain::KnownLocation &location);
+  void saveKnownLocation(const domain::KnownLocation & location);
 
   /// Retrieves a known location by name. Returns std::nullopt if none
   /// exists with that name.
   std::optional<domain::KnownLocation>
-  loadKnownLocationByName(const std::string &name);
+  loadKnownLocationByName(const std::string & name);
 
   /// Retrieves every known location currently stored.
   std::vector<domain::KnownLocation> loadAllKnownLocations();
 
 private:
   std::unique_ptr<SQLite::Database> db_;
-  Logger &logger_;
+  Logger & logger_;
 
-  void ensureSchema(const std::string &schemaPath);
+  void ensureSchema(const std::string & schemaPath);
 };
 
 } // namespace knowledge_manager::persistence

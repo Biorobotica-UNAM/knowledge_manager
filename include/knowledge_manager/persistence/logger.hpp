@@ -2,7 +2,8 @@
 
 #include <string>
 
-namespace knowledge_manager::persistence {
+namespace knowledge_manager::persistence
+{
 
 /// Abstract logging interface owned by this package.
 ///
@@ -22,15 +23,15 @@ public:
   /// Reports a message describing a failure that likely requires
   /// attention (e.g. a repository operation that could not complete
   /// due to an infrastructure fault).
-  virtual void error(const std::string &message) = 0;
+  virtual void error(const std::string & message) = 0;
 
   /// Reports a message describing a recoverable or non-critical
   /// anomaly.
-  virtual void warn(const std::string &message) = 0;
+  virtual void warn(const std::string & message) = 0;
 
   /// Reports a message describing a normal, expected event worth
   /// recording (e.g. successful startup).
-  virtual void info(const std::string &message) = 0;
+  virtual void info(const std::string & message) = 0;
 };
 
 } // namespace knowledge_manager::persistence

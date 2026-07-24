@@ -8,7 +8,8 @@
 #include <optional>
 #include <string>
 
-namespace knowledge_manager::domain {
+namespace knowledge_manager::domain
+{
 
 class Robot {
 public:
@@ -16,10 +17,10 @@ public:
   Robot(std::string name, KnownLocation knownLocation);
 
   std::string getName() const;
-  void setName(const std::string &name);
+  void setName(const std::string & name);
 
   KnownLocation getKnownLocation() const;
-  void setKnownLocation(const KnownLocation &knownLocation);
+  void setKnownLocation(const KnownLocation & knownLocation);
 
   std::optional<ManipulableObject> getObjectInHand(RobotHand hand) const;
   void setObjectInHand(RobotHand hand, std::optional<ManipulableObject> object);

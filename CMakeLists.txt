@@ -17,7 +17,7 @@ find_package(yaml-cpp REQUIRED)
 # is), so it is fetched and built as part of this project instead of
 # requiring every teammate/CI machine to install it manually.
 include(FetchContent)
-FetchContent_Declare(
+fetchcontent_declare(
   SQLiteCpp
   GIT_REPOSITORY https://github.com/SRombauts/SQLiteCpp.git
   GIT_TAG        3.3.1
@@ -28,7 +28,7 @@ set(SQLITECPP_RUN_CPPLINT OFF CACHE BOOL "" FORCE)
 set(SQLITECPP_RUN_CPPCHECK OFF CACHE BOOL "" FORCE)
 set(SQLITECPP_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
 set(SQLITECPP_BUILD_TESTS OFF CACHE BOOL "" FORCE)
-FetchContent_MakeAvailable(SQLiteCpp)
+fetchcontent_makeavailable(SQLiteCpp)
 
 # ── knowledge_manager_core (library, shared by the node and tests) ──
 # Domain, config, and persistence sources are built once as a static

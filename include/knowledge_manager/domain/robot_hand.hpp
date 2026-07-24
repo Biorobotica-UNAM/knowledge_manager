@@ -1,6 +1,7 @@
 #pragma once
 
-namespace knowledge_manager::domain {
+namespace knowledge_manager::domain
+{
 
 enum class RobotHand { LEFT, RIGHT };
 

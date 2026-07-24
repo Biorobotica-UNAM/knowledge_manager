@@ -1,6 +1,7 @@
 #pragma once
 
-namespace knowledge_manager::domain {
+namespace knowledge_manager::domain
+{
 
 class Pose3D {
 public:

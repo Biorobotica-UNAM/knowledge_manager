@@ -5,7 +5,8 @@
 #include <string>
 #include <variant>
 
-namespace knowledge_manager::domain {
+namespace knowledge_manager::domain
+{
 
 class ObjectOwnership {
 public:
@@ -22,10 +23,12 @@ public:
   RobotHand getRobotHand() const;
 
 private:
-  struct AtLocation {
+  struct AtLocation
+  {
     std::string name;
   };
-  struct HeldByPerson {
+  struct HeldByPerson
+  {
     std::string name;
   };
 

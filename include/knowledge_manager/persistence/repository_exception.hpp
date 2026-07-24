@@ -3,7 +3,8 @@
 #include <stdexcept>
 #include <string>
 
-namespace knowledge_manager::persistence {
+namespace knowledge_manager::persistence
+{
 
 /// Represents an infrastructure-level failure raised by
 /// KnowledgeRepository when it cannot complete a persistence
@@ -30,12 +31,12 @@ namespace knowledge_manager::persistence {
 class RepositoryException : public std::exception {
 public:
   explicit RepositoryException(std::string message)
-      : message_(std::move(message)) {}
+  : message_(std::move(message)) {}
 
   /// Returns a human-readable description of the underlying failure,
   /// suitable for logging or for inclusion in a higher-level Result
   /// error message assembled by WorldStateService.
-  const char *what() const noexcept override { return message_.c_str(); }
+  const char * what() const noexcept override {return message_.c_str();}
 
 private:
   std::string message_;

@@ -10,7 +10,8 @@
 #include <string>
 #include <vector>
 
-namespace knowledge_manager::domain {
+namespace knowledge_manager::domain
+{
 
 class Person {
 public:
@@ -18,25 +19,25 @@ public:
   Person(std::string name, PersonType personType, KnownLocation knownLocation);
 
   std::string getName() const;
-  void setName(const std::string &name);
+  void setName(const std::string & name);
 
   PersonType getPersonType() const;
   void setPersonType(PersonType personType);
 
   PhysicalDescription getPhysicalDescription() const;
-  void setPhysicalDescription(const PhysicalDescription &physicalDescription);
+  void setPhysicalDescription(const PhysicalDescription & physicalDescription);
 
   KnownLocation getKnownLocation() const;
-  void setKnownLocation(const KnownLocation &knownLocation);
+  void setKnownLocation(const KnownLocation & knownLocation);
 
   std::optional<Pose3D> getNavigablePose() const;
-  void setNavigablePose(const Pose3D &pose);
+  void setNavigablePose(const Pose3D & pose);
 
   std::string getFavoriteDrink() const;
-  void setFavoriteDrink(const std::string &favoriteDrink);
+  void setFavoriteDrink(const std::string & favoriteDrink);
 
   std::vector<ManipulableObject> getOrder() const;
-  void setOrder(const std::vector<ManipulableObject> &order);
+  void setOrder(const std::vector<ManipulableObject> & order);
 
 private:
   std::string name_;

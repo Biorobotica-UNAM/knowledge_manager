@@ -3,7 +3,8 @@
 #include "knowledge_manager/domain/pose3d.hpp"
 #include <string>
 
-namespace knowledge_manager::domain {
+namespace knowledge_manager::domain
+{
 
 class KnownLocation {
 public:
@@ -11,10 +12,10 @@ public:
   KnownLocation(std::string name, Pose3D pose);
 
   std::string getName() const;
-  void setName(const std::string &name);
+  void setName(const std::string & name);
 
   Pose3D getPose() const;
-  void setPose(const Pose3D &pose);
+  void setPose(const Pose3D & pose);
 
 private:
   std::string name_;

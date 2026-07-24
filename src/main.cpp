@@ -4,7 +4,8 @@
 
 #include <iostream>
 
-int main() {
+int main()
+{
   using namespace knowledge_manager::domain;
 
   Pose3D pose(1.0f, 2.0f, 0.0f, 0.0f, 0.0f, 0.0f, 1.0f);

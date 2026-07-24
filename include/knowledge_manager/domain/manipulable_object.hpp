@@ -6,28 +6,30 @@
 #include <optional>
 #include <string>
 
-namespace knowledge_manager::domain {
+namespace knowledge_manager::domain
+{
 
 class ManipulableObject {
 public:
   ManipulableObject();
-  ManipulableObject(std::string name, std::string category,
-                    ObjectOwnership ownership);
+  ManipulableObject(
+    std::string name, std::string category,
+    ObjectOwnership ownership);
 
   std::string getName() const;
-  void setName(const std::string &name);
+  void setName(const std::string & name);
 
   std::string getCategory() const;
-  void setCategory(const std::string &category);
+  void setCategory(const std::string & category);
 
   ObjectOwnership getOwnership() const;
-  void setOwnership(const ObjectOwnership &ownership);
+  void setOwnership(const ObjectOwnership & ownership);
 
   std::optional<Pose3D> getNavigablePose() const;
-  void setNavigablePose(const Pose3D &pose);
+  void setNavigablePose(const Pose3D & pose);
 
   std::optional<Pose3D> getGraspPose() const;
-  void setGraspPose(const Pose3D &pose);
+  void setGraspPose(const Pose3D & pose);
 
 private:
   std::string name_;
