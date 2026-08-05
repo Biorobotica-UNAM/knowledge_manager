@@ -29,6 +29,52 @@ WorldState WorldLoader::build() {
       } else if (type == "people") {
         state.people[key] = parse_people(value["entries"]);
       }
+
+      if (root["analytics"]) {
+        const auto &a = root["analytics"];
+
+        if (a["count"]) {
+          state.analytics.count.target_class =
+              a["count"]["target_class"].as<std::string>("");
+          state.analytics.count.class_count =
+              a["count"]["class_count"].as<int32_t>(0);
+          state.analytics.count.frame_count =
+              a["count"]["frame_count"].as<int32_t>(0);
+          state.analytics.count.cumulative =
+              a["count"]["cumulative"].as<int32_t>(0);
+        }
+        if (a["size"]) {
+          state.analytics.size.target_class =
+              a["size"]["target_class"].as<std::string>("");
+          state.analytics.size.filter_mode =
+              a["size"]["filter_mode"].as<std::string>("");
+          state.analytics.size.best_match =
+              a["size"]["best_match"].as<std::string>("");
+          state.analytics.size.confidence =
+              a["size"]["confidence"].as<float>(0.0f);
+        }
+        if (a["color"]) {
+          state.analytics.color.target_class =
+              a["color"]["target_class"].as<std::string>("");
+          state.analytics.color.color = a["color"]["color"].as<std::string>("");
+          state.analytics.color.best_match =
+              a["color"]["best_match"].as<std::string>("");
+        }
+        if (a["compare"]) {
+          state.analytics.compare.classes =
+              a["compare"]["classes"].as<std::string>("");
+          state.analytics.compare.winner =
+              a["compare"]["winner"].as<std::string>("");
+        }
+        if (a["gesture"]) {
+          state.analytics.gesture.target =
+              a["gesture"]["target"].as<std::string>("person");
+          state.analytics.gesture.gesture =
+              a["gesture"]["gesture"].as<std::string>("unknown");
+          state.analytics.gesture.detail =
+              a["gesture"]["detail"].as<std::string>("");
+        }
+      }
     }
   }
 
@@ -52,6 +98,17 @@ RobotDescription WorldLoader::parse_robot(const YAML::Node &node) const {
   if (node["right_hand"]) {
     const std::string item = node["right_hand"].as<std::string>();
     robot.right_hand = item;
+  }
+  if (node["safe_drop_mode"]) {
+    robot.safe_drop_mode = node["safe_drop_mode"].as<std::string>();
+  }
+  if (node["safe_drop_frame"]) {
+    robot.safe_drop_frame = node["safe_drop_frame"].as<std::string>();
+  }
+  if (node["safe_drop_pose"] && node["safe_drop_pose"].IsSequence()) {
+    for (const auto &coord : node["safe_drop_pose"]) {
+      robot.safe_drop_pose.push_back(coord.as<float>());
+    }
   }
 
   return robot;
