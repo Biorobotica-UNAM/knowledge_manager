@@ -5,6 +5,7 @@
 
 #include <SQLiteCpp/SQLiteCpp.h>
 
+#include "knowledge_manager/domain/object_category.hpp"
 #include "knowledge_manager/domain/object_ownership.hpp"
 #include "knowledge_manager/domain/robot_hand.hpp"
 #include "knowledge_manager/persistence/repository_exception.hpp"
@@ -14,6 +15,7 @@ namespace knowledge_manager::persistence
 
 using domain::KnownLocation;
 using domain::ManipulableObject;
+using domain::ObjectCategory;
 using domain::ObjectOwnership;
 using domain::Person;
 using domain::PersonType;
@@ -75,8 +77,130 @@ PersonType textToPersonType(const std::string & text)
   if (text == "user") {
     return PersonType::USER;
   }
-  throw RepositoryException("Unrecognized person_category name in database: '" +
+  throw RepositoryException("Unrecognized person category name in database: '" +
                             text + "'");
+}
+
+// -- Person.photo <-> BLOB in person.photo.
+//
+// Binds the given optional photo to a nullable BLOB parameter: NULL
+// when absent, the raw bytes (copied by SQLiteCpp, SQLITE_TRANSIENT)
+// otherwise. Kept private to this file, mirroring how RobotHand and
+// PersonType text encodings are also kept as file-local helpers --
+// callers of KnowledgeRepository never need to know the on-disk
+// representation.
+void bindOptionalPhoto(
+  SQLite::Statement & stmt, int index,
+  const std::optional<std::vector<std::byte>> & photo)
+{
+  if (photo.has_value()) {
+    stmt.bind(index, photo->data(), static_cast<int>(photo->size()));
+  } else {
+    stmt.bind(index);
+  }
+}
+
+// Reads a nullable BLOB column into an optional photo. Returns
+// std::nullopt if the column is NULL. Copies the bytes out of the
+// Column immediately, since Column::getBlob() returns a pointer only
+// valid while the owning Statement is alive.
+std::optional<std::vector<std::byte>>
+readOptionalPhoto(const SQLite::Column & column)
+{
+  if (column.isNull()) {
+    return std::nullopt;
+  }
+  const std::byte *data = static_cast<const std::byte *>(column.getBlob());
+  return std::vector<std::byte>(data, data + column.getBytes());
+}
+
+// -- ObjectCategory <-> TEXT, matching ManipulableObject_category.name rows.
+std::string objectCategoryToText(ObjectCategory category)
+{
+  switch (category) {
+    case ObjectCategory::FRUITS:
+      return "fruits";
+    case ObjectCategory::TRASH:
+      return "trash";
+    case ObjectCategory::TABLEWARE:
+      return "tableware";
+    case ObjectCategory::CUTLERY:
+      return "cutlery";
+    case ObjectCategory::GROCERY:
+      return "grocery";
+    case ObjectCategory::DRINKS:
+      return "drinks";
+    case ObjectCategory::SNACKS:
+      return "snacks";
+    case ObjectCategory::BASKET:
+      return "basket";
+    case ObjectCategory::FOOD:
+      return "food";
+    case ObjectCategory::CLEANING_SUPPLY:
+      return "cleaning_supply";
+    case ObjectCategory::CONTAINERS:
+      return "containers";
+    case ObjectCategory::CONTAINER_DROP:
+      return "container_drop";
+    case ObjectCategory::ELECTRODOMESTICS:
+      return "electrodomestics";
+    case ObjectCategory::TOYS:
+      return "toys";
+    case ObjectCategory::FABRIC:
+      return "fabric";
+  }
+  throw RepositoryException("Unrecognized ObjectCategory value");
+}
+
+ObjectCategory textToObjectCategory(const std::string & category)
+{
+  if (category == "fruits") {
+    return ObjectCategory::FRUITS;
+  }
+  if (category == "trash") {
+    return ObjectCategory::TRASH;
+  }
+  if (category == "tableware") {
+    return ObjectCategory::TABLEWARE;
+  }
+  if (category == "cutlery") {
+    return ObjectCategory::CUTLERY;
+  }
+  if (category == "grocery") {
+    return ObjectCategory::GROCERY;
+  }
+  if (category == "drinks") {
+    return ObjectCategory::DRINKS;
+  }
+  if (category == "snacks") {
+    return ObjectCategory::SNACKS;
+  }
+  if (category == "basket") {
+    return ObjectCategory::BASKET;
+  }
+  if (category == "food") {
+    return ObjectCategory::FOOD;
+  }
+  if (category == "cleaning_supply") {
+    return ObjectCategory::CLEANING_SUPPLY;
+  }
+  if (category == "containers") {
+    return ObjectCategory::CONTAINERS;
+  }
+  if (category == "container_drop") {
+    return ObjectCategory::CONTAINER_DROP;
+  }
+  if (category == "electrodomestics") {
+    return ObjectCategory::ELECTRODOMESTICS;
+  }
+  if (category == "toys") {
+    return ObjectCategory::TOYS;
+  }
+  if (category == "fabric") {
+    return ObjectCategory::FABRIC;
+  }
+  throw RepositoryException("Unrecognized object category name in database: '" +
+                            category + "'");
 }
 
 } // namespace
@@ -410,7 +534,11 @@ ManipulableObject buildObjectFromRow(
   }
   ObjectOwnership ownership = readObjectOwnership(db, stateStmt, 0, 1, 2);
 
-  ManipulableObject object(name, categoryName, ownership);
+  // categoryName comes from the object_category lookup table (TEXT),
+  // so it must be translated back into the fixed ObjectCategory enum
+  // before reaching the domain -- the domain constructor no longer
+  // accepts a free-text category (see ObjectCategory revision note).
+  ManipulableObject object(name, textToObjectCategory(categoryName), ownership);
   if (navPoseId.has_value()) {
     object.setNavigablePose(loadPoseOrDefault(db, navPoseId));
   }
@@ -435,7 +563,8 @@ namespace
 // on its own.
 void saveObjectImpl(SQLite::Database & db, const ManipulableObject & object)
 {
-  std::int64_t categoryId = resolveObjectCategoryId(db, object.getCategory());
+  std::int64_t categoryId =
+    resolveObjectCategoryId(db, objectCategoryToText(object.getCategory()));
 
   std::optional<std::int64_t> navPoseId;
   if (object.getNavigablePose().has_value()) {
@@ -524,15 +653,17 @@ KnowledgeRepository::loadObjectByName(const std::string & name)
 }
 
 std::vector<ManipulableObject>
-KnowledgeRepository::loadObjectsByCategory(const std::string & category)
+KnowledgeRepository::loadObjectsByCategory(ObjectCategory category)
 {
   std::vector<ManipulableObject> result;
   try {
+    std::string categoryName = objectCategoryToText(category);
+
     SQLite::Statement stmt(
       *db_, "SELECT o.id, o.name, o.nav_pose_id, o.manip_pose_id "
       "FROM object o JOIN object_category c ON o.category_id = c.id "
       "WHERE c.name = ?");
-    stmt.bind(1, category);
+    stmt.bind(1, categoryName);
     while (stmt.executeStep()) {
       std::int64_t objectId = stmt.getColumn(0).getInt64();
       std::string name = stmt.getColumn(1).getString();
@@ -545,7 +676,7 @@ KnowledgeRepository::loadObjectsByCategory(const std::string & category)
         graspPoseId = stmt.getColumn(3).getInt64();
       }
 
-      result.push_back(buildObjectFromRow(*db_, objectId, name, category,
+      result.push_back(buildObjectFromRow(*db_, objectId, name, categoryName,
                                           navPoseId, graspPoseId));
     }
   } catch (const SQLite::Exception & e) {
@@ -699,13 +830,19 @@ void writePersonOrder(
   }
 }
 
+// includePhoto is a file-private implementation detail, not part of
+// KnowledgeRepository's public interface: the public API expresses
+// the with/without-photo distinction through two named methods
+// (loadPersonByName / loadPersonByNameWithPhoto), not through a
+// boolean argument callers would have to interpret at the call site.
 Person buildPersonFromRow(
   SQLite::Database & db, std::int64_t personId,
   const std::string & name, PersonType type,
   const std::string & favoriteDrink,
   std::optional<std::int64_t> descriptionId,
   const std::optional<std::string> & locationName,
-  std::optional<std::int64_t> navPoseId)
+  std::optional<std::int64_t> navPoseId,
+  bool includePhoto)
 {
   KnownLocation location;
   if (locationName.has_value()) {
@@ -727,6 +864,18 @@ Person buildPersonFromRow(
     person.setNavigablePose(loadPoseOrDefault(db, navPoseId));
   }
   person.setOrder(loadPersonOrder(db, personId));
+
+  if (includePhoto) {
+    SQLite::Statement photoStmt(db, "SELECT photo FROM person WHERE id = ?");
+    photoStmt.bind(1, personId);
+    if (photoStmt.executeStep()) {
+      auto photo = readOptionalPhoto(photoStmt.getColumn(0));
+      if (photo.has_value()) {
+        person.setPhoto(*photo);
+      }
+    }
+  }
+
   return person;
 }
 
@@ -772,16 +921,25 @@ void KnowledgeRepository::savePerson(const Person & person)
       saveKnownLocation(person.getKnownLocation());
     }
 
+    // photo uses the same COALESCE-on-conflict strategy as nav_pose_id:
+    // a Person loaded via the default (no-photo) retrieval and saved
+    // back after an unrelated change (e.g. a new location) carries
+    // getPhoto() == std::nullopt, and must NOT wipe out a
+    // previously-stored photo it simply never loaded. Only a Person
+    // that explicitly carries a photo (via setPhoto, or loaded via
+    // the WithPhoto retrieval) overwrites the stored value.
     SQLite::Statement stmt(
       *db_,
       "INSERT INTO person (name, category_id, description_id, "
-      "favorite_drink, location_name, nav_pose_id) VALUES (?, ?, ?, ?, ?, ?) "
+      "favorite_drink, location_name, nav_pose_id, photo) "
+      "VALUES (?, ?, ?, ?, ?, ?, ?) "
       "ON CONFLICT(name) DO UPDATE SET "
       "category_id = excluded.category_id, "
       "description_id = excluded.description_id, "
       "favorite_drink = excluded.favorite_drink, "
       "location_name = excluded.location_name, "
-      "nav_pose_id = COALESCE(excluded.nav_pose_id, person.nav_pose_id)");
+      "nav_pose_id = COALESCE(excluded.nav_pose_id, person.nav_pose_id), "
+      "photo = COALESCE(excluded.photo, person.photo)");
     stmt.bind(1, person.getName());
     stmt.bind(2, categoryId);
     stmt.bind(3, descriptionId);
@@ -796,6 +954,7 @@ void KnowledgeRepository::savePerson(const Person & person)
     } else {
       stmt.bind(6);
     }
+    bindOptionalPhoto(stmt, 7, person.getPhoto());
     stmt.exec();
 
     SQLite::Statement idLookup(*db_, "SELECT id FROM person WHERE name = ?");
@@ -813,20 +972,97 @@ void KnowledgeRepository::savePerson(const Person & person)
   }
 }
 
+namespace
+{
+
+// Shared implementation for loadPersonByName / loadPersonByNameWithPhoto.
+// The two differ only in includePhoto, forwarded to buildPersonFromRow;
+// the query itself never selects the photo column, since photo bytes
+// are fetched separately (see buildPersonFromRow) only when actually
+// requested.
+std::optional<Person> loadPersonByNameImpl(
+  SQLite::Database & db,
+  const std::string & name,
+  bool includePhoto)
+{
+  SQLite::Statement stmt(
+    db, "SELECT id, category_id, favorite_drink, description_id, "
+    "location_name, nav_pose_id FROM person WHERE name = ?");
+  stmt.bind(1, name);
+  if (!stmt.executeStep()) {
+    return std::nullopt;
+  }
+
+  std::int64_t personId = stmt.getColumn(0).getInt64();
+  std::int64_t categoryId = stmt.getColumn(1).getInt64();
+  std::string favoriteDrink = stmt.getColumn(2).getString();
+  std::optional<std::int64_t> descriptionId;
+  if (!stmt.getColumn(3).isNull()) {
+    descriptionId = stmt.getColumn(3).getInt64();
+  }
+  std::optional<std::string> locationName;
+  if (!stmt.getColumn(4).isNull()) {
+    locationName = stmt.getColumn(4).getString();
+  }
+  std::optional<std::int64_t> navPoseId;
+  if (!stmt.getColumn(5).isNull()) {
+    navPoseId = stmt.getColumn(5).getInt64();
+  }
+
+  SQLite::Statement categoryLookup(
+    db, "SELECT name FROM person_category WHERE id = ?");
+  categoryLookup.bind(1, categoryId);
+  categoryLookup.executeStep();
+  PersonType type = textToPersonType(categoryLookup.getColumn(0).getString());
+
+  return buildPersonFromRow(db, personId, name, type, favoriteDrink,
+                            descriptionId, locationName, navPoseId,
+                            includePhoto);
+}
+
+} // namespace
+
 std::optional<Person>
 KnowledgeRepository::loadPersonByName(const std::string & name)
 {
   try {
-    SQLite::Statement stmt(
-      *db_, "SELECT id, category_id, favorite_drink, description_id, "
-      "location_name, nav_pose_id FROM person WHERE name = ?");
-    stmt.bind(1, name);
-    if (!stmt.executeStep()) {
-      return std::nullopt;
-    }
+    return loadPersonByNameImpl(*db_, name, /*includePhoto=*/false);
+  } catch (const SQLite::Exception & e) {
+    logger_.error(std::string("loadPersonByName failed: ") + e.what());
+    throw RepositoryException(std::string("loadPersonByName failed: ") +
+                              e.what());
+  }
+}
 
+std::optional<Person>
+KnowledgeRepository::loadPersonByNameWithPhoto(const std::string & name)
+{
+  try {
+    return loadPersonByNameImpl(*db_, name, /*includePhoto=*/true);
+  } catch (const SQLite::Exception & e) {
+    logger_.error(std::string("loadPersonByNameWithPhoto failed: ") + e.what());
+    throw RepositoryException(
+        std::string("loadPersonByNameWithPhoto failed: ") + e.what());
+  }
+}
+
+namespace
+{
+
+std::vector<Person> loadPersonsByTypeImpl(
+  SQLite::Database & db, PersonType type,
+  bool includePhoto)
+{
+  std::vector<Person> result;
+  SQLite::Statement stmt(
+    db, "SELECT p.id, p.name, p.favorite_drink, p.description_id, "
+    "p.location_name, p.nav_pose_id "
+    "FROM person p JOIN person_category c ON p.category_id = c.id "
+    "WHERE c.name = ?");
+  stmt.bind(1, personTypeToText(type));
+  while (stmt.executeStep()) {
     std::int64_t personId = stmt.getColumn(0).getInt64();
-    std::int64_t categoryId = stmt.getColumn(1).getInt64();
+    std::string name = stmt.getColumn(1).getString();
     std::string favoriteDrink = stmt.getColumn(2).getString();
     std::optional<std::int64_t> descriptionId;
     if (!stmt.getColumn(3).isNull()) {
@@ -841,58 +1077,37 @@ KnowledgeRepository::loadPersonByName(const std::string & name)
       navPoseId = stmt.getColumn(5).getInt64();
     }
 
-    SQLite::Statement categoryLookup(
-      *db_, "SELECT name FROM person_category WHERE id = ?");
-    categoryLookup.bind(1, categoryId);
-    categoryLookup.executeStep();
-    PersonType type = textToPersonType(categoryLookup.getColumn(0).getString());
-
-    return buildPersonFromRow(*db_, personId, name, type, favoriteDrink,
-                              descriptionId, locationName, navPoseId);
-  } catch (const SQLite::Exception & e) {
-    logger_.error(std::string("loadPersonByName failed: ") + e.what());
-    throw RepositoryException(std::string("loadPersonByName failed: ") +
-                              e.what());
+    result.push_back(buildPersonFromRow(db, personId, name, type, favoriteDrink,
+                                        descriptionId, locationName, navPoseId,
+                                        includePhoto));
   }
+  return result;
 }
+
+} // namespace
 
 std::vector<Person> KnowledgeRepository::loadPersonsByType(PersonType type)
 {
-  std::vector<Person> result;
   try {
-    SQLite::Statement stmt(
-      *db_, "SELECT p.id, p.name, p.favorite_drink, p.description_id, "
-      "p.location_name, p.nav_pose_id "
-      "FROM person p JOIN person_category c ON p.category_id = c.id "
-      "WHERE c.name = ?");
-    stmt.bind(1, personTypeToText(type));
-    while (stmt.executeStep()) {
-      std::int64_t personId = stmt.getColumn(0).getInt64();
-      std::string name = stmt.getColumn(1).getString();
-      std::string favoriteDrink = stmt.getColumn(2).getString();
-      std::optional<std::int64_t> descriptionId;
-      if (!stmt.getColumn(3).isNull()) {
-        descriptionId = stmt.getColumn(3).getInt64();
-      }
-      std::optional<std::string> locationName;
-      if (!stmt.getColumn(4).isNull()) {
-        locationName = stmt.getColumn(4).getString();
-      }
-      std::optional<std::int64_t> navPoseId;
-      if (!stmt.getColumn(5).isNull()) {
-        navPoseId = stmt.getColumn(5).getInt64();
-      }
-
-      result.push_back(buildPersonFromRow(*db_, personId, name, type,
-                                          favoriteDrink, descriptionId,
-                                          locationName, navPoseId));
-    }
+    return loadPersonsByTypeImpl(*db_, type, /*includePhoto=*/false);
   } catch (const SQLite::Exception & e) {
     logger_.error(std::string("loadPersonsByType failed: ") + e.what());
     throw RepositoryException(std::string("loadPersonsByType failed: ") +
                               e.what());
   }
-  return result;
+}
+
+std::vector<Person>
+KnowledgeRepository::loadPersonsByTypeWithPhoto(PersonType type)
+{
+  try {
+    return loadPersonsByTypeImpl(*db_, type, /*includePhoto=*/true);
+  } catch (const SQLite::Exception & e) {
+    logger_.error(std::string("loadPersonsByTypeWithPhoto failed: ") +
+                  e.what());
+    throw RepositoryException(
+        std::string("loadPersonsByTypeWithPhoto failed: ") + e.what());
+  }
 }
 
 void KnowledgeRepository::deletePerson(const std::string & name)

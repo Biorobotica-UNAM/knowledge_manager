@@ -6,14 +6,14 @@ namespace knowledge_manager::domain
 Person::Person()
 : name_(""), personType_(PersonType::GUEST), physicalDescription_(),
   knownLocation_(), navigablePose_(std::nullopt), favoriteDrink_(""),
-  order_() {}
+  order_(), photo_(std::nullopt) {}
 
 Person::Person(
   std::string name, PersonType personType,
   KnownLocation knownLocation)
 : name_(std::move(name)), personType_(personType), physicalDescription_(),
   knownLocation_(std::move(knownLocation)), navigablePose_(std::nullopt),
-  favoriteDrink_(""), order_() {}
+  favoriteDrink_(""), order_(), photo_(std::nullopt) {}
 
 std::string Person::getName() const {return name_;}
 void Person::setName(const std::string & name) {name_ = name;}
@@ -54,5 +54,11 @@ void Person::setOrder(const std::vector<ManipulableObject> & order)
 {
   order_ = order;
 }
+
+std::optional<std::vector<std::byte>> Person::getPhoto() const
+{
+  return photo_;
+}
+void Person::setPhoto(const std::vector<std::byte> & photo) {photo_ = photo;}
 
 } // namespace knowledge_manager::domain

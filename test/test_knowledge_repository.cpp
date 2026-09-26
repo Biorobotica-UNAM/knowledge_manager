@@ -1,9 +1,12 @@
+#include <cstddef>
 #include <cstdio>
+#include <vector>
 
 #include <gtest/gtest.h>
 
 #include "knowledge_manager/domain/known_location.hpp"
 #include "knowledge_manager/domain/manipulable_object.hpp"
+#include "knowledge_manager/domain/object_category.hpp"
 #include "knowledge_manager/domain/object_ownership.hpp"
 #include "knowledge_manager/domain/person.hpp"
 #include "knowledge_manager/domain/robot.hpp"
@@ -96,7 +99,7 @@ TEST_F(KnowledgeRepositoryTest, SavedObjectAtLocation_RoundTripsOwnership) {
   KnownLocation kitchen("kitchen", Pose3D());
   repo_->saveKnownLocation(kitchen);
 
-  ManipulableObject apple("apple", "fruit",
+  ManipulableObject apple("apple", ObjectCategory::FRUITS,
     ObjectOwnership::atLocation("kitchen"));
   repo_->saveObject(apple);
 
@@ -104,11 +107,11 @@ TEST_F(KnowledgeRepositoryTest, SavedObjectAtLocation_RoundTripsOwnership) {
   ASSERT_TRUE(loaded.has_value());
   EXPECT_TRUE(loaded->getOwnership().isAtLocation());
   EXPECT_EQ(loaded->getOwnership().getLocationName(), "kitchen");
-  EXPECT_EQ(loaded->getCategory(), "fruit");
+  EXPECT_EQ(loaded->getCategory(), ObjectCategory::FRUITS);
 }
 
 TEST_F(KnowledgeRepositoryTest, SavedObjectHeldByRobot_RoundTripsOwnership) {
-  ManipulableObject spoon("spoon", "cutlery",
+  ManipulableObject spoon("spoon", ObjectCategory::CUTLERY,
     ObjectOwnership::heldByRobot(RobotHand::RIGHT));
   repo_->saveObject(spoon);
 
@@ -122,10 +125,11 @@ TEST_F(KnowledgeRepositoryTest, SavedObjectHeldByPerson_RoundTripsOwnership) {
   Person ana("Ana", PersonType::GUEST, KnownLocation("kitchen", Pose3D()));
   repo_->savePerson(ana);
 
-  ManipulableObject book("book", "misc", ObjectOwnership::heldByPerson("Ana"));
-  repo_->saveObject(book);
+  ManipulableObject backpack("backpack", ObjectCategory::CONTAINERS,
+    ObjectOwnership::heldByPerson("Ana"));
+  repo_->saveObject(backpack);
 
-  auto loaded = repo_->loadObjectByName("book");
+  auto loaded = repo_->loadObjectByName("backpack");
   ASSERT_TRUE(loaded.has_value());
   EXPECT_TRUE(loaded->getOwnership().isHeldByPerson());
   EXPECT_EQ(loaded->getOwnership().getPersonName(), "Ana");
@@ -134,20 +138,22 @@ TEST_F(KnowledgeRepositoryTest, SavedObjectHeldByPerson_RoundTripsOwnership) {
 TEST_F(KnowledgeRepositoryTest, LoadObjectsByCategory_ReturnsOnlyMatching) {
   KnownLocation kitchen("kitchen", Pose3D());
   repo_->saveKnownLocation(kitchen);
-  repo_->saveObject(ManipulableObject("apple", "fruit",
+  repo_->saveObject(ManipulableObject("apple", ObjectCategory::FRUITS,
                                       ObjectOwnership::atLocation("kitchen")));
-  repo_->saveObject(ManipulableObject("banana", "fruit",
+  repo_->saveObject(ManipulableObject("banana", ObjectCategory::FRUITS,
                                       ObjectOwnership::atLocation("kitchen")));
-  repo_->saveObject(ManipulableObject(
-      "spoon", "cutlery", ObjectOwnership::heldByRobot(RobotHand::LEFT)));
+  repo_->saveObject(
+      ManipulableObject("spoon", ObjectCategory::CUTLERY,
+                        ObjectOwnership::heldByRobot(RobotHand::LEFT)));
 
-  auto fruits = repo_->loadObjectsByCategory("fruit");
+  auto fruits = repo_->loadObjectsByCategory(ObjectCategory::FRUITS);
   EXPECT_EQ(fruits.size(), 2u);
 }
 
 TEST_F(KnowledgeRepositoryTest, DeleteObject_RemovesIt) {
-  repo_->saveObject(ManipulableObject(
-      "banana", "fruit", ObjectOwnership::heldByRobot(RobotHand::LEFT)));
+  repo_->saveObject(
+      ManipulableObject("banana", ObjectCategory::FRUITS,
+                        ObjectOwnership::heldByRobot(RobotHand::LEFT)));
   repo_->deleteObject("banana");
   EXPECT_EQ(repo_->loadObjectByName("banana"), std::nullopt);
 }
@@ -155,7 +161,8 @@ TEST_F(KnowledgeRepositoryTest, DeleteObject_RemovesIt) {
 TEST_F(KnowledgeRepositoryTest,
        SaveObject_UnknownPersonOwner_ThrowsRepositoryException) {
   ManipulableObject ghostOwned(
-    "ghost_item", "misc", ObjectOwnership::heldByPerson("NobodyByThisName"));
+    "napkin", ObjectCategory::TRASH,
+    ObjectOwnership::heldByPerson("NobodyByThisName"));
   EXPECT_THROW(repo_->saveObject(ghostOwned), RepositoryException);
 }
 
@@ -164,7 +171,7 @@ TEST_F(KnowledgeRepositoryTest,
 TEST_F(KnowledgeRepositoryTest, SavedPerson_RoundTripsFieldsAndOrder) {
   KnownLocation kitchen("kitchen", Pose3D());
   repo_->saveKnownLocation(kitchen);
-  repo_->saveObject(ManipulableObject("apple", "fruit",
+  repo_->saveObject(ManipulableObject("apple", ObjectCategory::FRUITS,
                                       ObjectOwnership::atLocation("kitchen")));
   auto apple = repo_->loadObjectByName("apple");
   ASSERT_TRUE(apple.has_value());
@@ -203,11 +210,113 @@ TEST_F(KnowledgeRepositoryTest, DeletePerson_RemovesThem) {
   EXPECT_EQ(repo_->loadPersonByName("Temp"), std::nullopt);
 }
 
+// -- Person.photo ------------------------------------------------------
+
+TEST_F(KnowledgeRepositoryTest,
+       SavedPersonWithPhoto_LoadByNameWithPhoto_RoundTripsBytes) {
+  std::vector<std::byte> photo{std::byte{0xDE}, std::byte{0xAD},
+    std::byte{0xBE}, std::byte{0xEF}};
+
+  Person ana("Ana", PersonType::GUEST, KnownLocation("kitchen", Pose3D()));
+  ana.setPhoto(photo);
+  repo_->savePerson(ana);
+
+  auto loaded = repo_->loadPersonByNameWithPhoto("Ana");
+  ASSERT_TRUE(loaded.has_value());
+  ASSERT_TRUE(loaded->getPhoto().has_value());
+  EXPECT_EQ(*loaded->getPhoto(), photo);
+}
+
+TEST_F(KnowledgeRepositoryTest,
+       SavedPersonWithoutPhoto_LoadByNameWithPhoto_ReturnsNullopt) {
+  Person bob("Bob", PersonType::GUEST, KnownLocation("kitchen", Pose3D()));
+  repo_->savePerson(bob);
+
+  auto loaded = repo_->loadPersonByNameWithPhoto("Bob");
+  ASSERT_TRUE(loaded.has_value());
+  EXPECT_FALSE(loaded->getPhoto().has_value());
+}
+
+TEST_F(KnowledgeRepositoryTest,
+       LoadPersonByName_Default_NeverReturnsPhotoEvenIfStored) {
+  std::vector<std::byte> photo{std::byte{0x01}, std::byte{0x02}};
+
+  Person carla("Carla", PersonType::GUEST, KnownLocation("kitchen", Pose3D()));
+  carla.setPhoto(photo);
+  repo_->savePerson(carla);
+
+  // The default retrieval must leave getPhoto() empty regardless of
+  // whether a photo is actually stored -- callers that need to know
+  // must use loadPersonByNameWithPhoto instead (see
+  // KnowledgeRepository, contract 2, and Person::getPhoto()'s note on
+  // "not loaded" vs. "doesn't exist" being indistinguishable here by
+  // design).
+  auto loaded = repo_->loadPersonByName("Carla");
+  ASSERT_TRUE(loaded.has_value());
+  EXPECT_FALSE(loaded->getPhoto().has_value());
+}
+
+TEST_F(KnowledgeRepositoryTest,
+       SavingPersonLoadedWithoutPhoto_DoesNotWipeStoredPhoto) {
+  std::vector<std::byte> photo{std::byte{0xAA}, std::byte{0xBB}};
+
+  Person dave("Dave", PersonType::GUEST, KnownLocation("kitchen", Pose3D()));
+  dave.setPhoto(photo);
+  repo_->savePerson(dave);
+
+  // Simulate a caller that only needed to update an unrelated field
+  // (favorite drink): it loads the default (no-photo) form, changes
+  // that field, and saves it back. getPhoto() is std::nullopt on this
+  // in-memory Person -- not because the photo was deleted, but
+  // because it was never loaded. savePerson must not interpret that
+  // as "clear the photo" (see the COALESCE strategy documented on
+  // KnowledgeRepository::savePerson / schema.sql's person.photo).
+  auto loadedDefault = repo_->loadPersonByName("Dave");
+  ASSERT_TRUE(loadedDefault.has_value());
+  ASSERT_FALSE(loadedDefault->getPhoto().has_value());
+
+  loadedDefault->setFavoriteDrink("orange juice");
+  repo_->savePerson(*loadedDefault);
+
+  auto loadedWithPhoto = repo_->loadPersonByNameWithPhoto("Dave");
+  ASSERT_TRUE(loadedWithPhoto.has_value());
+  EXPECT_EQ(loadedWithPhoto->getFavoriteDrink(), "orange juice");
+  ASSERT_TRUE(loadedWithPhoto->getPhoto().has_value());
+  EXPECT_EQ(*loadedWithPhoto->getPhoto(), photo);
+}
+
+TEST_F(KnowledgeRepositoryTest,
+       LoadPersonsByTypeWithPhoto_ReturnsPhotosForMatchingType) {
+  std::vector<std::byte> photo{std::byte{0x7A}};
+  KnownLocation kitchen("kitchen", Pose3D());
+
+  Person guestWithPhoto("Eve", PersonType::GUEST, kitchen);
+  guestWithPhoto.setPhoto(photo);
+  repo_->savePerson(guestWithPhoto);
+  repo_->savePerson(Person("Frank", PersonType::GUEST, kitchen));
+
+  auto defaultResults = repo_->loadPersonsByType(PersonType::GUEST);
+  for (const auto & person : defaultResults) {
+    EXPECT_FALSE(person.getPhoto().has_value());
+  }
+
+  auto withPhotoResults = repo_->loadPersonsByTypeWithPhoto(PersonType::GUEST);
+  ASSERT_EQ(withPhotoResults.size(), 2u);
+  for (const auto & person : withPhotoResults) {
+    if (person.getName() == "Eve") {
+      ASSERT_TRUE(person.getPhoto().has_value());
+      EXPECT_EQ(*person.getPhoto(), photo);
+    } else {
+      EXPECT_FALSE(person.getPhoto().has_value());
+    }
+  }
+}
+
 // -- Robot --------------------------------------------------------------
 
 TEST_F(KnowledgeRepositoryTest, SavedRobot_RoundTripsStateAndHeldObjects) {
   KnownLocation kitchen("kitchen", Pose3D());
-  ManipulableObject spoon("spoon", "cutlery",
+  ManipulableObject spoon("spoon", ObjectCategory::CUTLERY,
     ObjectOwnership::heldByRobot(RobotHand::RIGHT));
 
   Robot robot("Justina", kitchen);

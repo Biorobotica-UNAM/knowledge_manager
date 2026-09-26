@@ -6,6 +6,7 @@
 #include "knowledge_manager/domain/physical_description.hpp"
 #include "knowledge_manager/domain/pose3d.hpp"
 
+#include <cstddef>
 #include <optional>
 #include <string>
 #include <vector>
@@ -39,6 +40,16 @@ public:
   std::vector<ManipulableObject> getOrder() const;
   void setOrder(const std::vector<ManipulableObject> & order);
 
+  // Returns std::nullopt both when no photo has ever been set for
+  // this person, and when this Person instance was loaded via the
+  // no-photo (default) KnowledgeRepository/WorldStateService methods.
+  // Callers that must distinguish "no photo exists" from "photo not
+  // loaded" need to use the WithPhoto retrieval explicitly -- this
+  // getter alone cannot tell them apart, by design (see
+  // KnowledgeRepository).
+  std::optional<std::vector<std::byte>> getPhoto() const;
+  void setPhoto(const std::vector<std::byte> & photo);
+
 private:
   std::string name_;
   PersonType personType_;
@@ -47,6 +58,7 @@ private:
   std::optional<Pose3D> navigablePose_;
   std::string favoriteDrink_;
   std::vector<ManipulableObject> order_;
+  std::optional<std::vector<std::byte>> photo_;
 };
 
 } // namespace knowledge_manager::domain

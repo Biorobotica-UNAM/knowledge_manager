@@ -1,5 +1,11 @@
--- schema.sql (v3)
+-- schema.sql (v4)
 -- SQLite schema for the Justina knowledge_bank world-state database.
+-- v4 changes from v3:
+--   - person.photo (nullable BLOB) added, to store a person's photo
+--     directly in the database. NULL (not an empty blob) means "no
+--     photo stored"; see the PERSON section below for how this
+--     interacts with KnowledgeRepository's default vs. WithPhoto
+--     retrieval methods.
 -- v3 changes from v2:
 --   - object.name is now globally UNIQUE (was UNIQUE per category),
 --     matching the domain's assumption that ManipulableObject.name
@@ -111,7 +117,12 @@ CREATE TABLE IF NOT EXISTS person_description (
 -- as identity. location_name is nullable: a person can be detected
 -- before their room is known. favorite_drink defaults to '' (empty),
 -- not 'unknown', per Person.getFavoriteDrink()'s contract ("empty
--- otherwise" when personType isn't guest).
+-- otherwise" when personType isn't guest). photo is a nullable BLOB
+-- (no DEFAULT): NULL means "no photo stored", never an empty blob --
+-- this is what lets savePerson's "photo = COALESCE(excluded.photo,
+-- person.photo)" leave an existing photo untouched when a Person
+-- loaded without one (see loadPersonByName vs.
+-- loadPersonByNameWithPhoto) is saved back.
 -- ---------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS person (
     id                  INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -120,7 +131,8 @@ CREATE TABLE IF NOT EXISTS person (
     description_id      INTEGER REFERENCES person_description(id) ON DELETE SET NULL,
     favorite_drink      TEXT NOT NULL DEFAULT '',
     location_name       TEXT REFERENCES known_location(name) ON DELETE SET NULL,
-    nav_pose_id         INTEGER REFERENCES pose_3d(id) ON DELETE SET NULL
+    nav_pose_id         INTEGER REFERENCES pose_3d(id) ON DELETE SET NULL,
+    photo               BLOB
 );
 
 CREATE INDEX IF NOT EXISTS idx_person_category ON person(category_id);

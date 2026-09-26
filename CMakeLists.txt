@@ -47,9 +47,8 @@ set(DOMAIN_SOURCES
   src/domain/robot.cpp
 )
 
-set(CONFIG_SOURCES
-  src/config/object_category.cpp
-)
+# set(CONFIG_SOURCES
+# )
 
 set(PERSISTENCE_SOURCES
   src/persistence/knowledge_repository.cpp
@@ -57,7 +56,7 @@ set(PERSISTENCE_SOURCES
 
 add_library(knowledge_manager_core
   ${DOMAIN_SOURCES}
-  ${CONFIG_SOURCES}
+  # ${CONFIG_SOURCES}
   ${PERSISTENCE_SOURCES}
 )
 
