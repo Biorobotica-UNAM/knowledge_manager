@@ -262,9 +262,12 @@ void KnowledgeRepository::ensureSchema(const std::string & schemaPath)
 //
 // Pose3D is a value object with no identity of its own in the domain,
 // so KnowledgeRepository owns the decision of how it maps to a row:
-// every save inserts a fresh pose_3d row and returns its id, rather
-// than updating one in place. This mirrors how the domain has no
-// getId() on Pose3D to update by.
+// the owning row (known_location, object or person) remembers which
+// pose_3d row it uses, and a save updates that row in place
+// (upsertPose) instead of inserting a new one every time. Each
+// pose_3d row has exactly one owner, so updating in place never
+// affects another entity, and no orphan rows accumulate. The domain
+// still has no getId() on Pose3D: the id never leaves this file.
 // ---------------------------------------------------------------------
 
 namespace
@@ -318,6 +321,60 @@ Pose3D loadPoseOrDefault(
   return pose;
 }
 
+std::optional<std::int64_t> optionalInt64(const SQLite::Column & column)
+{
+  if (column.isNull()) {
+    return std::nullopt;
+  }
+  return column.getInt64();
+}
+
+// Returns true if a row with poseId existed and was updated.
+bool updatePose(SQLite::Database & db, std::int64_t poseId, const Pose3D & pose)
+{
+  SQLite::Statement stmt(db, "UPDATE pose_3d SET x = ?, y = ?, z = ?, "
+    "qx = ?, qy = ?, qz = ?, qw = ? WHERE id = ?");
+  stmt.bind(1, pose.getX());
+  stmt.bind(2, pose.getY());
+  stmt.bind(3, pose.getZ());
+  stmt.bind(4, pose.getQx());
+  stmt.bind(5, pose.getQy());
+  stmt.bind(6, pose.getQz());
+  stmt.bind(7, pose.getQw());
+  stmt.bind(8, poseId);
+  return stmt.exec() > 0;
+}
+
+// Returns the id of the pose_3d row now holding `pose`: reuses
+// `existingId` (updating that row in place) when the owner already has
+// one, and inserts a new row otherwise. This is what keeps repeated
+// saves of the same entity from leaving orphan pose_3d rows behind.
+std::int64_t upsertPose(
+  SQLite::Database & db,
+  std::optional<std::int64_t> existingId,
+  const Pose3D & pose)
+{
+  if (existingId.has_value() && updatePose(db, *existingId, pose)) {
+    return *existingId;
+  }
+  return insertPose(db, pose);
+}
+
+// Deletes a pose_3d row that its owner no longer references. Must be
+// called AFTER the owning row is deleted or repointed (the owner holds
+// a FK to pose_3d).
+void deletePoseIfPresent(
+  SQLite::Database & db,
+  std::optional<std::int64_t> poseId)
+{
+  if (!poseId.has_value()) {
+    return;
+  }
+  SQLite::Statement stmt(db, "DELETE FROM pose_3d WHERE id = ?");
+  stmt.bind(1, *poseId);
+  stmt.exec();
+}
+
 } // namespace
 
 // ---------------------------------------------------------------------
@@ -327,7 +384,16 @@ Pose3D loadPoseOrDefault(
 void KnowledgeRepository::saveKnownLocation(const KnownLocation & location)
 {
   try {
-    std::int64_t poseId = insertPose(*db_, location.getPose());
+    std::optional<std::int64_t> currentPoseId;
+    {
+      SQLite::Statement current(
+        *db_, "SELECT pose_id FROM known_location WHERE name = ?");
+      current.bind(1, location.getName());
+      if (current.executeStep()) {
+        currentPoseId = optionalInt64(current.getColumn(0));
+      }
+    }
+    std::int64_t poseId = upsertPose(*db_, currentPoseId, location.getPose());
 
     SQLite::Statement stmt(
       *db_, "INSERT INTO known_location (name, pose_id) VALUES (?, ?) "
@@ -566,13 +632,28 @@ void saveObjectImpl(SQLite::Database & db, const ManipulableObject & object)
   std::int64_t categoryId =
     resolveObjectCategoryId(db, objectCategoryToText(object.getCategory()));
 
+  // Reuse the pose rows this object already points to (if any), so
+  // that re-saving an object (e.g. vision refining its pose) updates
+  // them in place instead of leaving the previous rows orphaned.
+  std::optional<std::int64_t> currentNavPoseId;
+  std::optional<std::int64_t> currentGraspPoseId;
+  {
+    SQLite::Statement current(
+      db, "SELECT nav_pose_id, manip_pose_id FROM object WHERE name = ?");
+    current.bind(1, object.getName());
+    if (current.executeStep()) {
+      currentNavPoseId = optionalInt64(current.getColumn(0));
+      currentGraspPoseId = optionalInt64(current.getColumn(1));
+    }
+  }
+
   std::optional<std::int64_t> navPoseId;
   if (object.getNavigablePose().has_value()) {
-    navPoseId = insertPose(db, *object.getNavigablePose());
+    navPoseId = upsertPose(db, currentNavPoseId, *object.getNavigablePose());
   }
   std::optional<std::int64_t> graspPoseId;
   if (object.getGraspPose().has_value()) {
-    graspPoseId = insertPose(db, *object.getGraspPose());
+    graspPoseId = upsertPose(db, currentGraspPoseId, *object.getGraspPose());
   }
 
   SQLite::Statement stmt(
@@ -659,10 +740,17 @@ KnowledgeRepository::loadObjectsByCategory(ObjectCategory category)
   try {
     std::string categoryName = objectCategoryToText(category);
 
+    // ORDER BY o.id is part of this method's contract: objects are
+    // returned in order of first registration (FIFO), which
+    // WorldStateService::getObjectByCategoryAndPosition relies on
+    // (plans refer to objects as fruits_1, fruits_2, ...).
+    // saveObjectImpl preserves the id on update (upsert), so this
+    // order is stable across re-saves. Do not remove it.
     SQLite::Statement stmt(
       *db_, "SELECT o.id, o.name, o.nav_pose_id, o.manip_pose_id "
       "FROM object o JOIN object_category c ON o.category_id = c.id "
-      "WHERE c.name = ?");
+      "WHERE c.name = ? "
+      "ORDER BY o.id ASC");
     stmt.bind(1, categoryName);
     while (stmt.executeStep()) {
       std::int64_t objectId = stmt.getColumn(0).getInt64();
@@ -690,9 +778,29 @@ KnowledgeRepository::loadObjectsByCategory(ObjectCategory category)
 void KnowledgeRepository::deleteObject(const std::string & name)
 {
   try {
+    SQLite::Transaction transaction(*db_);
+
+    std::optional<std::int64_t> navPoseId;
+    std::optional<std::int64_t> graspPoseId;
+    {
+      SQLite::Statement poses(
+        *db_, "SELECT nav_pose_id, manip_pose_id FROM object WHERE name = ?");
+      poses.bind(1, name);
+      if (poses.executeStep()) {
+        navPoseId = optionalInt64(poses.getColumn(0));
+        graspPoseId = optionalInt64(poses.getColumn(1));
+      }
+    }
+
     SQLite::Statement stmt(*db_, "DELETE FROM object WHERE name = ?");
     stmt.bind(1, name);
     stmt.exec();
+
+    // The object owned these pose rows exclusively; remove them with it.
+    deletePoseIfPresent(*db_, navPoseId);
+    deletePoseIfPresent(*db_, graspPoseId);
+
+    transaction.commit();
   } catch (const SQLite::Exception & e) {
     logger_.error(std::string("deleteObject failed: ") + e.what());
     throw RepositoryException(std::string("deleteObject failed: ") + e.what());
@@ -739,6 +847,40 @@ insertPersonDescription(
   stmt.bind(6, description.getAccessories());
   stmt.exec();
   return db.getLastInsertRowid();
+}
+
+bool updatePersonDescription(
+  SQLite::Database & db, std::int64_t descriptionId,
+  const domain::PhysicalDescription & description)
+{
+  SQLite::Statement stmt(
+    db,
+    "UPDATE person_description SET gender = ?, clothes = ?, age = ?, "
+    "hair = ?, facial_expression = ?, accessories_phrase = ? WHERE id = ?");
+  stmt.bind(1, description.getGender());
+  stmt.bind(2, description.getClothes());
+  stmt.bind(3, description.getAge());
+  stmt.bind(4, description.getHairType());
+  stmt.bind(5, description.getFacialExpression());
+  stmt.bind(6, description.getAccessories());
+  stmt.bind(7, descriptionId);
+  return stmt.exec() > 0;
+}
+
+// Same idea as upsertPose: reuse the person's existing description
+// row when there is one, instead of inserting a new row on every save.
+std::int64_t
+upsertPersonDescription(
+  SQLite::Database & db,
+  std::optional<std::int64_t> existingId,
+  const domain::PhysicalDescription & description)
+{
+  if (existingId.has_value() &&
+    updatePersonDescription(db, *existingId, description))
+  {
+    return *existingId;
+  }
+  return insertPersonDescription(db, description);
 }
 
 domain::PhysicalDescription
@@ -907,12 +1049,28 @@ void KnowledgeRepository::savePerson(const Person & person)
 
     std::int64_t categoryId =
       resolvePersonCategoryId(*db_, person.getPersonType());
-    std::int64_t descriptionId =
-      insertPersonDescription(*db_, person.getPhysicalDescription());
+    // Reuse the description and nav-pose rows this person already
+    // owns (if any) instead of inserting new ones on every save.
+    std::optional<std::int64_t> currentDescriptionId;
+    std::optional<std::int64_t> currentNavPoseId;
+    {
+      SQLite::Statement current(
+        *db_,
+        "SELECT description_id, nav_pose_id FROM person WHERE name = ?");
+      current.bind(1, person.getName());
+      if (current.executeStep()) {
+        currentDescriptionId = optionalInt64(current.getColumn(0));
+        currentNavPoseId = optionalInt64(current.getColumn(1));
+      }
+    }
+
+    std::int64_t descriptionId = upsertPersonDescription(
+        *db_, currentDescriptionId, person.getPhysicalDescription());
 
     std::optional<std::int64_t> navPoseId;
     if (person.getNavigablePose().has_value()) {
-      navPoseId = insertPose(*db_, *person.getNavigablePose());
+      navPoseId =
+        upsertPose(*db_, currentNavPoseId, *person.getNavigablePose());
     }
 
     std::string locationName = person.getKnownLocation().getName();
@@ -1054,11 +1212,17 @@ std::vector<Person> loadPersonsByTypeImpl(
   bool includePhoto)
 {
   std::vector<Person> result;
+  // ORDER BY p.id is part of the contract: persons are returned in
+  // order of first registration (FIFO). savePerson preserves the id on
+  // update (upsert), so the order is stable across re-saves. Note the
+  // position is by first registration, not by when the person acquired
+  // the current type (e.g. a USER demoted to GUEST keeps their place).
   SQLite::Statement stmt(
     db, "SELECT p.id, p.name, p.favorite_drink, p.description_id, "
     "p.location_name, p.nav_pose_id "
     "FROM person p JOIN person_category c ON p.category_id = c.id "
-    "WHERE c.name = ?");
+    "WHERE c.name = ? "
+    "ORDER BY p.id ASC");
   stmt.bind(1, personTypeToText(type));
   while (stmt.executeStep()) {
     std::int64_t personId = stmt.getColumn(0).getInt64();
@@ -1113,9 +1277,36 @@ KnowledgeRepository::loadPersonsByTypeWithPhoto(PersonType type)
 void KnowledgeRepository::deletePerson(const std::string & name)
 {
   try {
+    SQLite::Transaction transaction(*db_);
+
+    std::optional<std::int64_t> descriptionId;
+    std::optional<std::int64_t> navPoseId;
+    {
+      SQLite::Statement owned(
+        *db_,
+        "SELECT description_id, nav_pose_id FROM person WHERE name = ?");
+      owned.bind(1, name);
+      if (owned.executeStep()) {
+        descriptionId = optionalInt64(owned.getColumn(0));
+        navPoseId = optionalInt64(owned.getColumn(1));
+      }
+    }
+
     SQLite::Statement stmt(*db_, "DELETE FROM person WHERE name = ?");
     stmt.bind(1, name);
     stmt.exec();
+
+    // The person owned these rows exclusively; remove them with it.
+    // Their KnownLocation is shared and is deliberately left alone.
+    deletePoseIfPresent(*db_, navPoseId);
+    if (descriptionId.has_value()) {
+      SQLite::Statement dropDescription(
+        *db_, "DELETE FROM person_description WHERE id = ?");
+      dropDescription.bind(1, *descriptionId);
+      dropDescription.exec();
+    }
+
+    transaction.commit();
   } catch (const SQLite::Exception & e) {
     logger_.error(std::string("deletePerson failed: ") + e.what());
     throw RepositoryException(std::string("deletePerson failed: ") + e.what());

@@ -85,6 +85,10 @@ public:
   /// Inserts or updates a manipulable object in the database,
   /// including persisting its current ObjectOwnership (location,
   /// person, or robot hand) as the object's exclusive-arc state.
+  /// If an object with the same name already exists it is updated in
+  /// place (upsert, never delete-and-reinsert) and keeps its original
+  /// registration position; a new object is registered at the end of
+  /// the order. A null pose on the argument keeps the stored pose.
   void saveObject(const domain::ManipulableObject & object);
 
   /// Retrieves a manipulable object by name, reconstructing its
@@ -95,10 +99,18 @@ public:
 
   /// Retrieves all manipulable objects belonging to the given
   /// category, each with its current ObjectOwnership resolved.
+  /// Objects are returned in order of first registration (FIFO),
+  /// regardless of their current ObjectOwnership. This order is part
+  /// of the contract: WorldStateService::getObjectByCategoryAndPosition
+  /// depends on it.
   std::vector<domain::ManipulableObject>
   loadObjectsByCategory(domain::ObjectCategory category);
 
-  /// Removes a manipulable object from the database by name.
+  /// Removes a manipulable object (and the pose rows it owned) from
+  /// the database by name. Deleting an object shifts the position of
+  /// every object registered after it within its category. Must not be
+  /// called while a running plan refers to objects by position
+  /// (e.g. fruits_1).
   void deleteObject(const std::string & name);
 
   // -- Person ----------------------------------------------------------
@@ -121,16 +133,19 @@ public:
   loadPersonByNameWithPhoto(const std::string & name);
 
   /// Retrieves all persons of the given type (e.g. all guests), with
-  /// getPhoto() left std::nullopt on each. Default retrieval; see
-  /// loadPersonByName.
+  /// getPhoto() left std::nullopt on each, in order of first
+  /// registration (FIFO). Default retrieval; see loadPersonByName.
   std::vector<domain::Person> loadPersonsByType(domain::PersonType type);
 
   /// Retrieves all persons of the given type, including each
-  /// person's photo if one is stored.
+  /// person's photo if one is stored, in order of first registration
+  /// (FIFO).
   std::vector<domain::Person>
   loadPersonsByTypeWithPhoto(domain::PersonType type);
 
-  /// Removes a person from the database by name.
+  /// Removes a person (and the description and pose rows they owned)
+  /// from the database by name. Shifts the position of persons
+  /// registered after them.
   void deletePerson(const std::string & name);
 
   // -- KnownLocation -----------------------------------------------

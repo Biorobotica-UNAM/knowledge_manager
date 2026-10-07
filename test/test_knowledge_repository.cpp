@@ -1,8 +1,14 @@
 #include <cstddef>
+#include <cstdint>
 #include <cstdio>
+#include <memory>
+#include <optional>
+#include <string>
 #include <vector>
 
 #include <gtest/gtest.h>
+
+#include <SQLiteCpp/SQLiteCpp.h>
 
 #include "knowledge_manager/domain/known_location.hpp"
 #include "knowledge_manager/domain/manipulable_object.hpp"
@@ -40,6 +46,26 @@ public:
   }
 };
 
+// Names of a list of objects/persons, in the order given. Used to
+// assert FIFO order with a single readable EXPECT_EQ.
+template<typename T>
+std::vector<std::string> namesOf(const std::vector<T> & items)
+{
+  std::vector<std::string> names;
+  for (const auto & item : items) {
+    names.push_back(item.getName());
+  }
+  return names;
+}
+
+ManipulableObject objectAtKitchen(
+  const std::string & name,
+  ObjectCategory category)
+{
+  return ManipulableObject(name, category,
+                           ObjectOwnership::atLocation("kitchen"));
+}
+
 // gtest fixture: gives every TEST_F below a fresh database file and a
 // fresh KnowledgeRepository, and cleans up afterward. This avoids
 // repeating the same setup/teardown code in each test (Clean Code:
@@ -59,6 +85,54 @@ protected:
   {
     repo_.reset(); // close the connection before removing the file
     std::remove(dbPath_.c_str());
+  }
+
+  // Objects used in ownership "at location" need their location to
+  // exist first (see SavedObjectAtLocation_RoundTripsOwnership).
+  void saveKitchen()
+  {
+    repo_->saveKnownLocation(KnownLocation("kitchen", Pose3D()));
+  }
+
+  // -- Inspecting the database from outside the repository -----------
+  //
+  // The repository deliberately hides its tables, so the "no orphan
+  // rows" tests open a second, read-only connection to the same file
+  // and count rows directly. This is test-only: production code never
+  // does this. All saves in the repository are committed by the time
+  // they return, so this connection always sees the final state.
+
+  std::int64_t scalar(const std::string & sql)
+  {
+    SQLite::Database db(dbPath_, SQLite::OPEN_READONLY);
+    SQLite::Statement query(db, sql);
+    query.executeStep();
+    return query.getColumn(0).getInt64();
+  }
+
+  std::int64_t countRows(const std::string & table)
+  {
+    return scalar("SELECT COUNT(*) FROM " + table);
+  }
+
+  // pose_3d rows that no known_location, object or person points to.
+  std::int64_t countOrphanPoses()
+  {
+    return scalar(
+        "SELECT COUNT(*) FROM pose_3d WHERE id NOT IN ("
+        " SELECT pose_id FROM known_location WHERE pose_id IS NOT NULL"
+        " UNION SELECT nav_pose_id FROM object WHERE nav_pose_id IS NOT NULL"
+        " UNION SELECT manip_pose_id FROM object WHERE manip_pose_id IS NOT "
+        "NULL"
+        " UNION SELECT nav_pose_id FROM person WHERE nav_pose_id IS NOT NULL)");
+  }
+
+  // person_description rows that no person points to.
+  std::int64_t countOrphanDescriptions()
+  {
+    return scalar(
+        "SELECT COUNT(*) FROM person_description WHERE id NOT IN ("
+        " SELECT description_id FROM person WHERE description_id IS NOT NULL)");
   }
 
   // KNOWLEDGE_MANAGER_SCHEMA_PATH is injected by CMake (see
@@ -166,7 +240,177 @@ TEST_F(KnowledgeRepositoryTest,
   EXPECT_THROW(repo_->saveObject(ghostOwned), RepositoryException);
 }
 
-// -- Person -----------------------------------------------------------
+// -- Object FIFO order (fruits_1, fruits_2, ... aliases) -------------
+//
+// loadObjectsByCategory returns objects in order of first
+// registration. WorldStateService::getObjectByCategoryAndPosition and
+// the plans' positional aliases depend on this.
+
+TEST_F(KnowledgeRepositoryTest,
+       LoadObjectsByCategory_ReturnsFirstRegistrationOrder_NotAlphabetical) {
+  saveKitchen();
+  // Deliberately not alphabetical, so a name-ordered result would fail.
+  repo_->saveObject(objectAtKitchen("pear", ObjectCategory::FRUITS));
+  repo_->saveObject(objectAtKitchen("apple", ObjectCategory::FRUITS));
+  repo_->saveObject(objectAtKitchen("mango", ObjectCategory::FRUITS));
+
+  auto fruits = repo_->loadObjectsByCategory(ObjectCategory::FRUITS);
+  EXPECT_EQ(namesOf(fruits),
+    (std::vector<std::string>{"pear", "apple", "mango"}));
+}
+
+TEST_F(KnowledgeRepositoryTest, LoadObjectsByCategory_OrderIsPerCategory) {
+  saveKitchen();
+  repo_->saveObject(objectAtKitchen("pear", ObjectCategory::FRUITS));
+  repo_->saveObject(objectAtKitchen("fork", ObjectCategory::CUTLERY));
+  repo_->saveObject(objectAtKitchen("apple", ObjectCategory::FRUITS));
+  repo_->saveObject(objectAtKitchen("knife", ObjectCategory::CUTLERY));
+
+  EXPECT_EQ(namesOf(repo_->loadObjectsByCategory(ObjectCategory::FRUITS)),
+    (std::vector<std::string>{"pear", "apple"}));
+  EXPECT_EQ(namesOf(repo_->loadObjectsByCategory(ObjectCategory::CUTLERY)),
+    (std::vector<std::string>{"fork", "knife"}));
+}
+
+TEST_F(KnowledgeRepositoryTest, ReSavingObject_KeepsItsOriginalPosition) {
+  saveKitchen();
+  ManipulableObject pear = objectAtKitchen("pear", ObjectCategory::FRUITS);
+  repo_->saveObject(pear);
+  repo_->saveObject(objectAtKitchen("apple", ObjectCategory::FRUITS));
+
+  // Vision refines pear's pose: the same object is saved again. It
+  // must not move to the end of the queue (saveObject is an upsert,
+  // not delete-and-reinsert).
+  pear.setNavigablePose(Pose3D(1.0f, 2.0f, 0.0f, 0, 0, 0, 1));
+  repo_->saveObject(pear);
+  pear.setNavigablePose(Pose3D(3.0f, 4.0f, 0.0f, 0, 0, 0, 1));
+  repo_->saveObject(pear);
+
+  auto fruits = repo_->loadObjectsByCategory(ObjectCategory::FRUITS);
+  EXPECT_EQ(namesOf(fruits), (std::vector<std::string>{"pear", "apple"}));
+}
+
+TEST_F(KnowledgeRepositoryTest,
+       ObjectPosition_IsIndependentOfCurrentOwnership) {
+  saveKitchen();
+  repo_->saveObject(objectAtKitchen("pear", ObjectCategory::FRUITS));
+  repo_->saveObject(objectAtKitchen("apple", ObjectCategory::FRUITS));
+
+  // The robot picks up pear: it must still be fruits_1.
+  repo_->saveObject(
+      ManipulableObject("pear", ObjectCategory::FRUITS,
+                        ObjectOwnership::heldByRobot(RobotHand::LEFT)));
+
+  auto fruits = repo_->loadObjectsByCategory(ObjectCategory::FRUITS);
+  ASSERT_EQ(fruits.size(), 2u);
+  EXPECT_EQ(fruits[0].getName(), "pear");
+  EXPECT_TRUE(fruits[0].getOwnership().isHeldByRobot());
+  EXPECT_EQ(fruits[1].getName(), "apple");
+}
+
+TEST_F(KnowledgeRepositoryTest, DeleteObject_ShiftsPositionsOfLaterObjects) {
+  // Documents the restriction stated on deleteObject: deleting an
+  // object shifts the later ones up. Plans must not delete objects
+  // while they refer to them by position.
+  saveKitchen();
+  repo_->saveObject(objectAtKitchen("pear", ObjectCategory::FRUITS));
+  repo_->saveObject(objectAtKitchen("apple", ObjectCategory::FRUITS));
+  repo_->saveObject(objectAtKitchen("mango", ObjectCategory::FRUITS));
+
+  repo_->deleteObject("pear");
+
+  EXPECT_EQ(namesOf(repo_->loadObjectsByCategory(ObjectCategory::FRUITS)),
+    (std::vector<std::string>{"apple", "mango"}));
+
+  // A newly registered object goes to the end of the queue.
+  repo_->saveObject(objectAtKitchen("kiwi", ObjectCategory::FRUITS));
+  EXPECT_EQ(namesOf(repo_->loadObjectsByCategory(ObjectCategory::FRUITS)),
+    (std::vector<std::string>{"apple", "mango", "kiwi"}));
+}
+
+// -- Object poses: no orphan rows ------------------------------------
+
+TEST_F(KnowledgeRepositoryTest,
+       ReSavingObjectWithNewPoses_UpdatesInPlace_NoOrphanPoses) {
+  saveKitchen();
+  ManipulableObject apple = objectAtKitchen("apple", ObjectCategory::FRUITS);
+  apple.setNavigablePose(Pose3D(1.0f, 0.0f, 0.0f, 0, 0, 0, 1));
+  apple.setGraspPose(Pose3D(2.0f, 0.0f, 0.0f, 0, 0, 0, 1));
+  repo_->saveObject(apple);
+
+  const std::int64_t posesAfterFirstSave = countRows("pose_3d");
+
+  for (int i = 1; i <= 5; ++i) {
+    apple.setNavigablePose(Pose3D(10.0f + i, 0.0f, 0.0f, 0, 0, 0, 1));
+    apple.setGraspPose(Pose3D(20.0f + i, 0.0f, 0.0f, 0, 0, 0, 1));
+    repo_->saveObject(apple);
+  }
+
+  EXPECT_EQ(countRows("pose_3d"), posesAfterFirstSave);
+  EXPECT_EQ(countOrphanPoses(), 0);
+
+  auto loaded = repo_->loadObjectByName("apple");
+  ASSERT_TRUE(loaded.has_value());
+  ASSERT_TRUE(loaded->getNavigablePose().has_value());
+  ASSERT_TRUE(loaded->getGraspPose().has_value());
+  EXPECT_FLOAT_EQ(loaded->getNavigablePose()->getX(), 15.0f);
+  EXPECT_FLOAT_EQ(loaded->getGraspPose()->getX(), 25.0f);
+}
+
+TEST_F(KnowledgeRepositoryTest,
+       SavingObjectWithoutPose_KeepsPreviouslyStoredPose) {
+  saveKitchen();
+  ManipulableObject apple = objectAtKitchen("apple", ObjectCategory::FRUITS);
+  apple.setNavigablePose(Pose3D(7.0f, 0.0f, 0.0f, 0, 0, 0, 1));
+  repo_->saveObject(apple);
+
+  // Saved again by someone who never loaded the pose (e.g. an
+  // ownership change): the stored pose must not be wiped.
+  repo_->saveObject(objectAtKitchen("apple", ObjectCategory::FRUITS));
+
+  auto loaded = repo_->loadObjectByName("apple");
+  ASSERT_TRUE(loaded.has_value());
+  ASSERT_TRUE(loaded->getNavigablePose().has_value());
+  EXPECT_FLOAT_EQ(loaded->getNavigablePose()->getX(), 7.0f);
+  EXPECT_EQ(countOrphanPoses(), 0);
+}
+
+TEST_F(KnowledgeRepositoryTest, DeleteObject_RemovesThePosesItOwned) {
+  saveKitchen();
+  const std::int64_t baseline = countRows("pose_3d");
+
+  ManipulableObject apple = objectAtKitchen("apple", ObjectCategory::FRUITS);
+  apple.setNavigablePose(Pose3D(1.0f, 0.0f, 0.0f, 0, 0, 0, 1));
+  apple.setGraspPose(Pose3D(2.0f, 0.0f, 0.0f, 0, 0, 0, 1));
+  repo_->saveObject(apple);
+  ASSERT_EQ(countRows("pose_3d"), baseline + 2);
+
+  repo_->deleteObject("apple");
+
+  EXPECT_EQ(countRows("pose_3d"), baseline);
+  EXPECT_EQ(countOrphanPoses(), 0);
+}
+
+// -- KnownLocation poses: no orphan rows -----------------------------
+
+TEST_F(KnowledgeRepositoryTest,
+       ReSavingKnownLocation_UpdatesPoseInPlace_NoOrphanPoses) {
+  repo_->saveKnownLocation(
+      KnownLocation("kitchen", Pose3D(1.0f, 1.0f, 0.0f, 0, 0, 0, 1)));
+  const std::int64_t posesAfterFirstSave = countRows("pose_3d");
+
+  repo_->saveKnownLocation(
+      KnownLocation("kitchen", Pose3D(9.0f, 9.0f, 0.0f, 0, 0, 0, 1)));
+
+  EXPECT_EQ(countRows("pose_3d"), posesAfterFirstSave);
+  EXPECT_EQ(countOrphanPoses(), 0);
+
+  auto loaded = repo_->loadKnownLocationByName("kitchen");
+  ASSERT_TRUE(loaded.has_value());
+  EXPECT_FLOAT_EQ(loaded->getPose().getX(), 9.0f);
+}
+
+// -- Person ------------------------------------------------------------
 
 TEST_F(KnowledgeRepositoryTest, SavedPerson_RoundTripsFieldsAndOrder) {
   KnownLocation kitchen("kitchen", Pose3D());
@@ -208,6 +452,106 @@ TEST_F(KnowledgeRepositoryTest, DeletePerson_RemovesThem) {
       Person("Temp", PersonType::GUEST, KnownLocation("kitchen", Pose3D())));
   repo_->deletePerson("Temp");
   EXPECT_EQ(repo_->loadPersonByName("Temp"), std::nullopt);
+}
+
+// -- Person FIFO order -------------------------------------------------
+
+TEST_F(KnowledgeRepositoryTest,
+       LoadPersonsByType_ReturnsFirstRegistrationOrder_NotAlphabetical) {
+  KnownLocation kitchen("kitchen", Pose3D());
+  repo_->savePerson(Person("Zoe", PersonType::GUEST, kitchen));
+  repo_->savePerson(Person("Ana", PersonType::GUEST, kitchen));
+  repo_->savePerson(Person("Mia", PersonType::GUEST, kitchen));
+
+  EXPECT_EQ(namesOf(repo_->loadPersonsByType(PersonType::GUEST)),
+    (std::vector<std::string>{"Zoe", "Ana", "Mia"}));
+  EXPECT_EQ(namesOf(repo_->loadPersonsByTypeWithPhoto(PersonType::GUEST)),
+    (std::vector<std::string>{"Zoe", "Ana", "Mia"}));
+}
+
+TEST_F(KnowledgeRepositoryTest, ReSavingPerson_KeepsItsOriginalPosition) {
+  KnownLocation kitchen("kitchen", Pose3D());
+  repo_->savePerson(Person("Zoe", PersonType::GUEST, kitchen));
+  Person ana("Ana", PersonType::GUEST, kitchen);
+  repo_->savePerson(ana);
+  repo_->savePerson(Person("Mia", PersonType::GUEST, kitchen));
+
+  ana.setFavoriteDrink("tea");
+  repo_->savePerson(ana);
+  ana.setFavoriteDrink("juice");
+  repo_->savePerson(ana);
+
+  EXPECT_EQ(namesOf(repo_->loadPersonsByType(PersonType::GUEST)),
+    (std::vector<std::string>{"Zoe", "Ana", "Mia"}));
+}
+
+TEST_F(KnowledgeRepositoryTest,
+       DemotedUser_KeepsItsRegistrationPositionAmongGuests) {
+  KnownLocation kitchen("kitchen", Pose3D());
+  repo_->savePerson(Person("Bob", PersonType::USER, kitchen));
+  repo_->savePerson(Person("Ana", PersonType::GUEST, kitchen));
+  repo_->savePerson(Person("Carla", PersonType::GUEST, kitchen));
+
+  // Dan becomes the USER; Bob is demoted to GUEST. Bob was registered
+  // first, so he is the first guest, not the last.
+  repo_->savePerson(Person("Dan", PersonType::USER, kitchen));
+
+  EXPECT_EQ(namesOf(repo_->loadPersonsByType(PersonType::GUEST)),
+    (std::vector<std::string>{"Bob", "Ana", "Carla"}));
+}
+
+// -- Person: no orphan rows --------------------------------------------
+
+TEST_F(KnowledgeRepositoryTest,
+       ReSavingPerson_UpdatesDescriptionAndPoseInPlace_NoOrphans) {
+  PhysicalDescription description;
+  description.setClothes("red shirt");
+
+  Person ana("Ana", PersonType::GUEST,
+    KnownLocation("kitchen", Pose3D(1.0f, 1.0f, 0.0f, 0, 0, 0, 1)));
+  ana.setPhysicalDescription(description);
+  ana.setNavigablePose(Pose3D(2.0f, 0.0f, 0.0f, 0, 0, 0, 1));
+  repo_->savePerson(ana);
+
+  const std::int64_t posesAfterFirstSave = countRows("pose_3d");
+  ASSERT_EQ(countRows("person_description"), 1);
+
+  for (int i = 1; i <= 5; ++i) {
+    description.setClothes("shirt " + std::to_string(i));
+    ana.setPhysicalDescription(description);
+    ana.setNavigablePose(Pose3D(10.0f + i, 0.0f, 0.0f, 0, 0, 0, 1));
+    repo_->savePerson(ana);
+  }
+
+  EXPECT_EQ(countRows("person_description"), 1);
+  EXPECT_EQ(countRows("pose_3d"), posesAfterFirstSave);
+  EXPECT_EQ(countOrphanDescriptions(), 0);
+  EXPECT_EQ(countOrphanPoses(), 0);
+
+  auto loaded = repo_->loadPersonByName("Ana");
+  ASSERT_TRUE(loaded.has_value());
+  EXPECT_EQ(loaded->getPhysicalDescription().getClothes(), "shirt 5");
+  ASSERT_TRUE(loaded->getNavigablePose().has_value());
+  EXPECT_FLOAT_EQ(loaded->getNavigablePose()->getX(), 15.0f);
+}
+
+TEST_F(KnowledgeRepositoryTest,
+       DeletePerson_RemovesOwnedRows_ButKeepsTheSharedKnownLocation) {
+  Person ana("Ana", PersonType::GUEST,
+    KnownLocation("kitchen", Pose3D(7.0f, 8.0f, 0.0f, 0, 0, 0, 1)));
+  ana.setNavigablePose(Pose3D(2.0f, 0.0f, 0.0f, 0, 0, 0, 1));
+  repo_->savePerson(ana);
+
+  repo_->deletePerson("Ana");
+
+  EXPECT_EQ(countRows("person_description"), 0);
+  EXPECT_EQ(countOrphanPoses(), 0);
+  // Only the kitchen's own pose remains.
+  EXPECT_EQ(countRows("pose_3d"), 1);
+
+  auto kitchen = repo_->loadKnownLocationByName("kitchen");
+  ASSERT_TRUE(kitchen.has_value());
+  EXPECT_FLOAT_EQ(kitchen->getPose().getX(), 7.0f);
 }
 
 // -- Person.photo ------------------------------------------------------
@@ -338,6 +682,30 @@ TEST_F(KnowledgeRepositoryTest, LoadRobot_NoRobotSavedYet_ReturnsDefaultRobot) {
   EXPECT_EQ(loaded.getName(), "");
 }
 
+TEST_F(KnowledgeRepositoryTest, SavingRobotRepeatedly_DoesNotGrowPoseTable) {
+  // saveRobot re-saves the robot's location and every held object, so
+  // repeated updateRobot calls used to insert new pose rows each time
+  // even when nothing had changed.
+  ManipulableObject spoon("spoon", ObjectCategory::CUTLERY,
+    ObjectOwnership::heldByRobot(RobotHand::RIGHT));
+  spoon.setNavigablePose(Pose3D(1.0f, 0.0f, 0.0f, 0, 0, 0, 1));
+  spoon.setGraspPose(Pose3D(2.0f, 0.0f, 0.0f, 0, 0, 0, 1));
+
+  Robot robot("Justina",
+    KnownLocation("kitchen", Pose3D(5.0f, 5.0f, 0.0f, 0, 0, 0, 1)));
+  robot.setObjectInHand(RobotHand::RIGHT, spoon);
+  repo_->saveRobot(robot);
+
+  const std::int64_t posesAfterFirstSave = countRows("pose_3d");
+
+  for (int i = 0; i < 10; ++i) {
+    repo_->saveRobot(robot);
+  }
+
+  EXPECT_EQ(countRows("pose_3d"), posesAfterFirstSave);
+  EXPECT_EQ(countOrphanPoses(), 0);
+}
+
 // -- Process restart / schema idempotency --------------------------
 
 TEST_F(KnowledgeRepositoryTest, EnsureSchema_IsIdempotentAcrossRestarts) {
@@ -358,4 +726,16 @@ TEST_F(KnowledgeRepositoryTest, EnsureSchema_IsIdempotentAcrossRestarts) {
 
   auto loadedAna = restarted.loadPersonByName("Ana");
   EXPECT_TRUE(loadedAna.has_value());
+}
+
+TEST_F(KnowledgeRepositoryTest, FifoOrder_SurvivesProcessRestart) {
+  saveKitchen();
+  repo_->saveObject(objectAtKitchen("pear", ObjectCategory::FRUITS));
+  repo_->saveObject(objectAtKitchen("apple", ObjectCategory::FRUITS));
+
+  repo_.reset();
+  KnowledgeRepository restarted(dbPath_, schemaPath_, logger_);
+
+  EXPECT_EQ(namesOf(restarted.loadObjectsByCategory(ObjectCategory::FRUITS)),
+    (std::vector<std::string>{"pear", "apple"}));
 }
