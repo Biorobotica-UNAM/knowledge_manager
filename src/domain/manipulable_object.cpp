@@ -1,19 +1,16 @@
 #include "knowledge_manager/domain/manipulable_object.hpp"
 
+#include <utility>
+
 namespace knowledge_manager::domain
 {
 
-ManipulableObject::ManipulableObject()
-: name_(""), category_(ObjectCategory::FRUITS),
-  ownership_(ObjectOwnership::atLocation("")), navigablePose_(std::nullopt),
-  graspPose_(std::nullopt) {}
-
 ManipulableObject::ManipulableObject(
   std::string name, ObjectCategory category,
+  LocationZone usualZone,
   ObjectOwnership ownership)
-: name_(std::move(name)), category_(category),
-  ownership_(std::move(ownership)), navigablePose_(std::nullopt),
-  graspPose_(std::nullopt) {}
+: name_(std::move(name)), category_(category), usualZone_(usualZone),
+  ownership_(std::move(ownership)) {}
 
 std::string ManipulableObject::getName() const {return name_;}
 void ManipulableObject::setName(const std::string & name) {name_ = name;}
@@ -23,6 +20,9 @@ void ManipulableObject::setCategory(ObjectCategory category)
 {
   category_ = category;
 }
+
+LocationZone ManipulableObject::getUsualZone() const {return usualZone_;}
+void ManipulableObject::setUsualZone(LocationZone zone) {usualZone_ = zone;}
 
 ObjectOwnership ManipulableObject::getOwnership() const {return ownership_;}
 void ManipulableObject::setOwnership(const ObjectOwnership & ownership)

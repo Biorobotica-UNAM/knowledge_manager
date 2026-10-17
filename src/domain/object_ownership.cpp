@@ -1,11 +1,17 @@
 #include "knowledge_manager/domain/object_ownership.hpp"
 
+#include <utility>
+
 namespace knowledge_manager::domain
 {
 
 ObjectOwnership::ObjectOwnership(Ownership ownership)
 : ownership_(std::move(ownership)) {}
 
+ObjectOwnership ObjectOwnership::unknown()
+{
+  return ObjectOwnership(Unknown{});
+}
 ObjectOwnership ObjectOwnership::atLocation(std::string locationName)
 {
   return ObjectOwnership(AtLocation{std::move(locationName)});
@@ -16,9 +22,13 @@ ObjectOwnership ObjectOwnership::heldByPerson(std::string personName)
 }
 ObjectOwnership ObjectOwnership::heldByRobot(RobotHand hand)
 {
-  return ObjectOwnership(hand);
+  return ObjectOwnership(HeldByRobot{hand});
 }
 
+bool ObjectOwnership::isUnknown() const
+{
+  return std::holds_alternative<Unknown>(ownership_);
+}
 bool ObjectOwnership::isAtLocation() const
 {
   return std::holds_alternative<AtLocation>(ownership_);
@@ -29,7 +39,7 @@ bool ObjectOwnership::isHeldByPerson() const
 }
 bool ObjectOwnership::isHeldByRobot() const
 {
-  return std::holds_alternative<RobotHand>(ownership_);
+  return std::holds_alternative<HeldByRobot>(ownership_);
 }
 
 std::string ObjectOwnership::getLocationName() const
@@ -42,7 +52,7 @@ std::string ObjectOwnership::getPersonName() const
 }
 RobotHand ObjectOwnership::getRobotHand() const
 {
-  return std::get<RobotHand>(ownership_);
+  return std::get<HeldByRobot>(ownership_).hand;
 }
 
 } // namespace knowledge_manager::domain

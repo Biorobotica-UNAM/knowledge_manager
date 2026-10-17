@@ -1,10 +1,12 @@
 #include "knowledge_manager/persistence/knowledge_repository.hpp"
 
+#include <cstdint>
 #include <fstream>
 #include <sstream>
 
 #include <SQLiteCpp/SQLiteCpp.h>
 
+#include "knowledge_manager/domain/location_zone.hpp"
 #include "knowledge_manager/domain/object_category.hpp"
 #include "knowledge_manager/domain/object_ownership.hpp"
 #include "knowledge_manager/domain/robot_hand.hpp"
@@ -14,6 +16,7 @@ namespace knowledge_manager::persistence
 {
 
 using domain::KnownLocation;
+using domain::LocationZone;
 using domain::ManipulableObject;
 using domain::ObjectCategory;
 using domain::ObjectOwnership;
@@ -45,6 +48,41 @@ RobotHand textToHand(const std::string & text)
   }
   throw RepositoryException(
       "Unrecognized held_by_robot_hand value in database: '" + text + "'");
+}
+
+// -- LocationZone <-> TEXT, matching the CHECK constraints on
+// known_location.zone and object.usual_zone.
+std::string zoneToText(LocationZone zone)
+{
+  switch (zone) {
+    case LocationZone::KITCHEN:
+      return "kitchen";
+    case LocationZone::LIVING_ROOM:
+      return "living_room";
+    case LocationZone::BEDROOM:
+      return "bedroom";
+    case LocationZone::LAUNDRY:
+      return "laundry";
+  }
+  throw RepositoryException("Unrecognized LocationZone value");
+}
+
+LocationZone textToZone(const std::string & text)
+{
+  if (text == "kitchen") {
+    return LocationZone::KITCHEN;
+  }
+  if (text == "living_room") {
+    return LocationZone::LIVING_ROOM;
+  }
+  if (text == "bedroom") {
+    return LocationZone::BEDROOM;
+  }
+  if (text == "laundry") {
+    return LocationZone::LAUNDRY;
+  }
+  throw RepositoryException("Unrecognized zone name in database: '" + text +
+                            "'");
 }
 
 // -- PersonType <-> TEXT, matching person_category.name rows.
@@ -247,7 +285,8 @@ void KnowledgeRepository::ensureSchema(const std::string & schemaPath)
     // schema.sql uses "CREATE TABLE IF NOT EXISTS" / "CREATE INDEX IF
     // NOT EXISTS" throughout, so running it again on an
     // already-initialized database (e.g. after a process restart) is
-    // safe and a no-op.
+    // safe and a no-op. It does NOT migrate a database created with
+    // an older schema version: such a file must be deleted once.
     db_->exec(buffer.str());
   } catch (const SQLite::Exception & e) {
     logger_.error(std::string("Failed to apply schema from '") + schemaPath +
@@ -375,6 +414,43 @@ void deletePoseIfPresent(
   stmt.exec();
 }
 
+// Builds a KnownLocation (name, pose, zone) from its known_location
+// row, or std::nullopt if no location has that name. Shared by every
+// place that has to turn a location name back into a KnownLocation
+// (loadKnownLocationByName, the Person and Robot loaders), so the
+// row-to-domain translation, now including the zone, lives in one
+// place.
+std::optional<KnownLocation> findKnownLocation(
+  SQLite::Database & db,
+  const std::string & name)
+{
+  SQLite::Statement stmt(
+    db, "SELECT pose_id, zone FROM known_location WHERE name = ?");
+  stmt.bind(1, name);
+  if (!stmt.executeStep()) {
+    return std::nullopt;
+  }
+  return KnownLocation(name,
+                       loadPoseOrDefault(db, optionalInt64(stmt.getColumn(0))),
+                       textToZone(stmt.getColumn(1).getString()));
+}
+
+// Drains a statement whose columns are (name, pose_id, zone) into a
+// list of KnownLocation. Shared by loadAllKnownLocations and
+// loadKnownLocationsByZone.
+std::vector<KnownLocation> collectKnownLocations(
+  SQLite::Database & db,
+  SQLite::Statement & stmt)
+{
+  std::vector<KnownLocation> result;
+  while (stmt.executeStep()) {
+    result.emplace_back(stmt.getColumn(0).getString(),
+                        loadPoseOrDefault(db, optionalInt64(stmt.getColumn(1))),
+                        textToZone(stmt.getColumn(2).getString()));
+  }
+  return result;
+}
+
 } // namespace
 
 // ---------------------------------------------------------------------
@@ -395,11 +471,14 @@ void KnowledgeRepository::saveKnownLocation(const KnownLocation & location)
     }
     std::int64_t poseId = upsertPose(*db_, currentPoseId, location.getPose());
 
-    SQLite::Statement stmt(
-      *db_, "INSERT INTO known_location (name, pose_id) VALUES (?, ?) "
-      "ON CONFLICT(name) DO UPDATE SET pose_id = excluded.pose_id");
+    SQLite::Statement stmt(*db_,
+      "INSERT INTO known_location (name, pose_id, zone) "
+      "VALUES (?, ?, ?) "
+      "ON CONFLICT(name) DO UPDATE SET "
+      "pose_id = excluded.pose_id, zone = excluded.zone");
     stmt.bind(1, location.getName());
     stmt.bind(2, poseId);
+    stmt.bind(3, zoneToText(location.getZone()));
     stmt.exec();
   } catch (const SQLite::Exception & e) {
     logger_.error(std::string("saveKnownLocation failed: ") + e.what());
@@ -412,19 +491,7 @@ std::optional<KnownLocation>
 KnowledgeRepository::loadKnownLocationByName(const std::string & name)
 {
   try {
-    SQLite::Statement stmt(*db_,
-      "SELECT pose_id FROM known_location WHERE name = ?");
-    stmt.bind(1, name);
-    if (!stmt.executeStep()) {
-      return std::nullopt;
-    }
-
-    std::optional<std::int64_t> poseId;
-    if (!stmt.getColumn(0).isNull()) {
-      poseId = stmt.getColumn(0).getInt64();
-    }
-
-    return KnownLocation(name, loadPoseOrDefault(*db_, poseId));
+    return findKnownLocation(*db_, name);
   } catch (const SQLite::Exception & e) {
     logger_.error(std::string("loadKnownLocationByName failed: ") + e.what());
     throw RepositoryException(std::string("loadKnownLocationByName failed: ") +
@@ -434,23 +501,30 @@ KnowledgeRepository::loadKnownLocationByName(const std::string & name)
 
 std::vector<KnownLocation> KnowledgeRepository::loadAllKnownLocations()
 {
-  std::vector<KnownLocation> result;
   try {
-    SQLite::Statement stmt(*db_, "SELECT name, pose_id FROM known_location");
-    while (stmt.executeStep()) {
-      std::string name = stmt.getColumn(0).getString();
-      std::optional<std::int64_t> poseId;
-      if (!stmt.getColumn(1).isNull()) {
-        poseId = stmt.getColumn(1).getInt64();
-      }
-      result.emplace_back(name, loadPoseOrDefault(*db_, poseId));
-    }
+    SQLite::Statement stmt(*db_,
+      "SELECT name, pose_id, zone FROM known_location");
+    return collectKnownLocations(*db_, stmt);
   } catch (const SQLite::Exception & e) {
     logger_.error(std::string("loadAllKnownLocations failed: ") + e.what());
     throw RepositoryException(std::string("loadAllKnownLocations failed: ") +
                               e.what());
   }
-  return result;
+}
+
+std::vector<KnownLocation>
+KnowledgeRepository::loadKnownLocationsByZone(LocationZone zone)
+{
+  try {
+    SQLite::Statement stmt(
+      *db_, "SELECT name, pose_id, zone FROM known_location WHERE zone = ?");
+    stmt.bind(1, zoneToText(zone));
+    return collectKnownLocations(*db_, stmt);
+  } catch (const SQLite::Exception & e) {
+    logger_.error(std::string("loadKnownLocationsByZone failed: ") + e.what());
+    throw RepositoryException(std::string("loadKnownLocationsByZone failed: ") +
+                              e.what());
+  }
 }
 
 // ---------------------------------------------------------------------
@@ -461,11 +535,10 @@ namespace
 {
 
 // Resolves the object_category.id for a given category name,
-// inserting the category if it is not yet known. ObjectCategory
-// (config package) is the source of truth for which category names
-// are *valid*; this repository does not re-validate that here (see
-// WorldStateService, which owns that check) -- it only needs an id to
-// store the already-accepted category string against.
+// inserting the category row if it is not yet there. ObjectCategory
+// is a fixed enumeration, so every name reaching this function is
+// already valid by construction; this only needs an id to store the
+// category against.
 std::int64_t resolveObjectCategoryId(
   SQLite::Database & db,
   const std::string & categoryName)
@@ -500,9 +573,9 @@ std::string objectCategoryNameById(
 
 // Writes the exclusive-arc row in object_state for the given
 // (already-inserted) object id, based on the in-memory
-// ObjectOwnership. Exactly one of the three columns is set, mirroring
-// the CHECK constraint in schema.sql and the domain-level guarantee
-// ObjectOwnership already provides by construction.
+// ObjectOwnership. At most one of the three columns is set, mirroring
+// the CHECK constraint in schema.sql: an unknown ownership leaves all
+// three NULL.
 void writeObjectState(
   SQLite::Database & db, std::int64_t objectId,
   const ObjectOwnership & ownership)
@@ -517,7 +590,11 @@ void writeObjectState(
     "held_by_robot_hand = excluded.held_by_robot_hand");
   stmt.bind(1, objectId);
 
-  if (ownership.isAtLocation()) {
+  if (ownership.isUnknown()) {
+    stmt.bind(2); // NULL
+    stmt.bind(3); // NULL
+    stmt.bind(4); // NULL
+  } else if (ownership.isAtLocation()) {
     stmt.bind(2, ownership.getLocationName());
     stmt.bind(3); // NULL
     stmt.bind(4); // NULL
@@ -546,7 +623,8 @@ void writeObjectState(
 // Reconstructs an ObjectOwnership from an object_state row already
 // positioned on the current row of stmt (columns: location_name,
 // held_by_person_id, held_by_robot_hand, in that order), resolving
-// held_by_person_id back to a person name.
+// held_by_person_id back to a person name. All three columns NULL
+// means the ownership is unknown.
 ObjectOwnership readObjectOwnership(
   SQLite::Database & db,
   SQLite::Statement & stmt, int locationCol,
@@ -569,24 +647,20 @@ ObjectOwnership readObjectOwnership(
     return ObjectOwnership::heldByRobot(
         textToHand(stmt.getColumn(handCol).getString()));
   }
-  // The CHECK constraint in schema.sql should make this unreachable;
-  // treated as a data-integrity failure rather than silently
-  // defaulted, since there is no sensible default ownership.
-  throw RepositoryException(
-      "object_state row has no ownership set (violates exclusive-arc)");
+  return ObjectOwnership::unknown();
 }
 
-// Builds a full ManipulableObject from an `object` row already
-// positioned on the current row of objStmt, joined with its
-// object_state row. Shared by loadObjectByName and
-// loadObjectsByCategory to avoid duplicating the same assembly logic
-// (Clean Code: don't repeat yourself across near-identical query
-// paths).
+// Builds a full ManipulableObject from the already-read columns of an
+// `object` row, joined with its object_state row. Shared by
+// loadObjectByName, loadObjectsByCategory and loadPersonOrder to avoid
+// duplicating the same assembly logic (Clean Code: don't repeat
+// yourself across near-identical query paths).
 ManipulableObject buildObjectFromRow(
   SQLite::Database & db,
   std::int64_t objectId,
   const std::string & name,
   const std::string & categoryName,
+  const std::string & usualZoneName,
   std::optional<std::int64_t> navPoseId,
   std::optional<std::int64_t> graspPoseId)
 {
@@ -600,11 +674,11 @@ ManipulableObject buildObjectFromRow(
   }
   ObjectOwnership ownership = readObjectOwnership(db, stateStmt, 0, 1, 2);
 
-  // categoryName comes from the object_category lookup table (TEXT),
-  // so it must be translated back into the fixed ObjectCategory enum
-  // before reaching the domain -- the domain constructor no longer
-  // accepts a free-text category (see ObjectCategory revision note).
-  ManipulableObject object(name, textToObjectCategory(categoryName), ownership);
+  // categoryName and usualZoneName come from TEXT columns, so they
+  // must be translated back into the fixed ObjectCategory and
+  // LocationZone enums before reaching the domain.
+  ManipulableObject object(name, textToObjectCategory(categoryName),
+    textToZone(usualZoneName), ownership);
   if (navPoseId.has_value()) {
     object.setNavigablePose(loadPoseOrDefault(db, navPoseId));
   }
@@ -658,23 +732,25 @@ void saveObjectImpl(SQLite::Database & db, const ManipulableObject & object)
 
   SQLite::Statement stmt(
     db,
-    "INSERT INTO object (name, category_id, nav_pose_id, manip_pose_id) "
-    "VALUES (?, ?, ?, ?) "
+    "INSERT INTO object (name, category_id, usual_zone, nav_pose_id, "
+    "manip_pose_id) VALUES (?, ?, ?, ?, ?) "
     "ON CONFLICT(name) DO UPDATE SET "
     "category_id = excluded.category_id, "
+    "usual_zone = excluded.usual_zone, "
     "nav_pose_id = COALESCE(excluded.nav_pose_id, object.nav_pose_id), "
     "manip_pose_id = COALESCE(excluded.manip_pose_id, object.manip_pose_id)");
   stmt.bind(1, object.getName());
   stmt.bind(2, categoryId);
+  stmt.bind(3, zoneToText(object.getUsualZone()));
   if (navPoseId.has_value()) {
-    stmt.bind(3, *navPoseId);
-  } else {
-    stmt.bind(3);
-  }
-  if (graspPoseId.has_value()) {
-    stmt.bind(4, *graspPoseId);
+    stmt.bind(4, *navPoseId);
   } else {
     stmt.bind(4);
+  }
+  if (graspPoseId.has_value()) {
+    stmt.bind(5, *graspPoseId);
+  } else {
+    stmt.bind(5);
   }
   stmt.exec();
 
@@ -705,8 +781,9 @@ std::optional<ManipulableObject>
 KnowledgeRepository::loadObjectByName(const std::string & name)
 {
   try {
-    SQLite::Statement stmt(*db_, "SELECT id, category_id, nav_pose_id, "
-      "manip_pose_id FROM object WHERE name = ?");
+    SQLite::Statement stmt(
+      *db_, "SELECT id, category_id, usual_zone, "
+      "nav_pose_id, manip_pose_id FROM object WHERE name = ?");
     stmt.bind(1, name);
     if (!stmt.executeStep()) {
       return std::nullopt;
@@ -715,17 +792,12 @@ KnowledgeRepository::loadObjectByName(const std::string & name)
     std::int64_t objectId = stmt.getColumn(0).getInt64();
     std::string categoryName =
       objectCategoryNameById(*db_, stmt.getColumn(1).getInt64());
-    std::optional<std::int64_t> navPoseId;
-    if (!stmt.getColumn(2).isNull()) {
-      navPoseId = stmt.getColumn(2).getInt64();
-    }
-    std::optional<std::int64_t> graspPoseId;
-    if (!stmt.getColumn(3).isNull()) {
-      graspPoseId = stmt.getColumn(3).getInt64();
-    }
+    std::string usualZoneName = stmt.getColumn(2).getString();
+    std::optional<std::int64_t> navPoseId = optionalInt64(stmt.getColumn(3));
+    std::optional<std::int64_t> graspPoseId = optionalInt64(stmt.getColumn(4));
 
-    return buildObjectFromRow(*db_, objectId, name, categoryName, navPoseId,
-                              graspPoseId);
+    return buildObjectFromRow(*db_, objectId, name, categoryName, usualZoneName,
+                              navPoseId, graspPoseId);
   } catch (const SQLite::Exception & e) {
     logger_.error(std::string("loadObjectByName failed: ") + e.what());
     throw RepositoryException(std::string("loadObjectByName failed: ") +
@@ -744,10 +816,12 @@ KnowledgeRepository::loadObjectsByCategory(ObjectCategory category)
     // returned in order of first registration (FIFO), which
     // WorldStateService::getObjectByCategoryAndPosition relies on
     // (plans refer to objects as fruits_1, fruits_2, ...).
-    // saveObjectImpl preserves the id on update (upsert), so this
-    // order is stable across re-saves. Do not remove it.
+    // saveObjectImpl preserves the id on update (upsert), and the
+    // startup reset never deletes objects, so this order is stable
+    // across re-saves and restarts. Do not remove it.
     SQLite::Statement stmt(
-      *db_, "SELECT o.id, o.name, o.nav_pose_id, o.manip_pose_id "
+      *db_, "SELECT o.id, o.name, o.usual_zone, o.nav_pose_id, "
+      "o.manip_pose_id "
       "FROM object o JOIN object_category c ON o.category_id = c.id "
       "WHERE c.name = ? "
       "ORDER BY o.id ASC");
@@ -755,17 +829,14 @@ KnowledgeRepository::loadObjectsByCategory(ObjectCategory category)
     while (stmt.executeStep()) {
       std::int64_t objectId = stmt.getColumn(0).getInt64();
       std::string name = stmt.getColumn(1).getString();
-      std::optional<std::int64_t> navPoseId;
-      if (!stmt.getColumn(2).isNull()) {
-        navPoseId = stmt.getColumn(2).getInt64();
-      }
-      std::optional<std::int64_t> graspPoseId;
-      if (!stmt.getColumn(3).isNull()) {
-        graspPoseId = stmt.getColumn(3).getInt64();
-      }
+      std::string usualZoneName = stmt.getColumn(2).getString();
+      std::optional<std::int64_t> navPoseId = optionalInt64(stmt.getColumn(3));
+      std::optional<std::int64_t> graspPoseId =
+        optionalInt64(stmt.getColumn(4));
 
       result.push_back(buildObjectFromRow(*db_, objectId, name, categoryName,
-                                          navPoseId, graspPoseId));
+                                          usualZoneName, navPoseId,
+                                          graspPoseId));
     }
   } catch (const SQLite::Exception & e) {
     logger_.error(std::string("loadObjectsByCategory failed: ") + e.what());
@@ -920,7 +991,8 @@ std::vector<ManipulableObject> loadPersonOrder(
 {
   std::vector<ManipulableObject> order;
   SQLite::Statement stmt(
-    db, "SELECT o.id, o.name, o.category_id, o.nav_pose_id, o.manip_pose_id "
+    db, "SELECT o.id, o.name, o.category_id, o.usual_zone, o.nav_pose_id, "
+    "o.manip_pose_id "
     "FROM person_order po JOIN object o ON po.object_id = o.id "
     "WHERE po.person_id = ? ORDER BY po.seq");
   stmt.bind(1, personId);
@@ -929,17 +1001,12 @@ std::vector<ManipulableObject> loadPersonOrder(
     std::string name = stmt.getColumn(1).getString();
     std::string categoryName =
       objectCategoryNameById(db, stmt.getColumn(2).getInt64());
-    std::optional<std::int64_t> navPoseId;
-    if (!stmt.getColumn(3).isNull()) {
-      navPoseId = stmt.getColumn(3).getInt64();
-    }
-    std::optional<std::int64_t> graspPoseId;
-    if (!stmt.getColumn(4).isNull()) {
-      graspPoseId = stmt.getColumn(4).getInt64();
-    }
+    std::string usualZoneName = stmt.getColumn(3).getString();
+    std::optional<std::int64_t> navPoseId = optionalInt64(stmt.getColumn(4));
+    std::optional<std::int64_t> graspPoseId = optionalInt64(stmt.getColumn(5));
 
     order.push_back(buildObjectFromRow(db, objectId, name, categoryName,
-                                       navPoseId, graspPoseId));
+                                       usualZoneName, navPoseId, graspPoseId));
   }
   return order;
 }
@@ -988,14 +1055,10 @@ Person buildPersonFromRow(
 {
   KnownLocation location;
   if (locationName.has_value()) {
-    SQLite::Statement locStmt(
-      db, "SELECT pose_id FROM known_location WHERE name = ?");
-    locStmt.bind(1, *locationName);
-    std::optional<std::int64_t> poseId;
-    if (locStmt.executeStep() && !locStmt.getColumn(0).isNull()) {
-      poseId = locStmt.getColumn(0).getInt64();
+    std::optional<KnownLocation> found = findKnownLocation(db, *locationName);
+    if (found.has_value()) {
+      location = *found;
     }
-    location = KnownLocation(*locationName, loadPoseOrDefault(db, poseId));
   }
 
   Person person(name, type, location);
@@ -1292,6 +1355,10 @@ void KnowledgeRepository::deletePerson(const std::string & name)
       }
     }
 
+    // Objects this person was holding need no explicit handling here:
+    // object_state.held_by_person_id is ON DELETE SET NULL, and "no
+    // owner column populated" is the valid UNKNOWN state, so they
+    // become unknown instead of pointing at a missing person.
     SQLite::Statement stmt(*db_, "DELETE FROM person WHERE name = ?");
     stmt.bind(1, name);
     stmt.exec();
@@ -1322,14 +1389,20 @@ void KnowledgeRepository::saveRobot(const Robot & robot)
   try {
     SQLite::Transaction transaction(*db_);
 
+    saveKnownLocation(robot.getStartLocation());
     saveKnownLocation(robot.getKnownLocation());
 
     SQLite::Statement stmt(
-      *db_, "INSERT INTO robot (id, name, location_name) VALUES (1, ?, ?) "
+      *db_,
+      "INSERT INTO robot (id, name, start_location_name, location_name) "
+      "VALUES (1, ?, ?, ?) "
       "ON CONFLICT(id) DO UPDATE SET "
-      "name = excluded.name, location_name = excluded.location_name");
+      "name = excluded.name, "
+      "start_location_name = excluded.start_location_name, "
+      "location_name = excluded.location_name");
     stmt.bind(1, robot.getName());
-    stmt.bind(2, robot.getKnownLocation().getName());
+    stmt.bind(2, robot.getStartLocation().getName());
+    stmt.bind(3, robot.getKnownLocation().getName());
     stmt.exec();
 
     // Hands: reflected in each held object's own object_state row,
@@ -1353,37 +1426,42 @@ void KnowledgeRepository::saveRobot(const Robot & robot)
   }
 }
 
-Robot KnowledgeRepository::loadRobot()
+std::optional<Robot> KnowledgeRepository::loadRobot()
 {
   try {
-    SQLite::Statement stmt(
-      *db_, "SELECT name, location_name FROM robot WHERE id = 1");
+    SQLite::Statement stmt(*db_,
+      "SELECT name, start_location_name, location_name "
+      "FROM robot WHERE id = 1");
     if (!stmt.executeStep()) {
-      // No robot persisted yet: return a default-constructed Robot,
-      // mirroring the same "no data yet -> default value object"
-      // stance used for Pose3D, rather than throwing for what is a
-      // normal state on a completely fresh database.
-      return Robot();
+      // No robot persisted yet: there is no meaningful "empty" Robot
+      // (a Robot always has a name and a start location), so "not
+      // found" is reported as std::nullopt, like every other load.
+      return std::nullopt;
     }
 
     std::string name = stmt.getColumn(0).getString();
-    std::optional<std::string> locationName;
-    if (!stmt.getColumn(1).isNull()) {
-      locationName = stmt.getColumn(1).getString();
+    std::string startLocationName = stmt.getColumn(1).getString();
+    std::string currentLocationName = stmt.getColumn(2).getString();
+
+    // Both columns are NOT NULL with ON DELETE RESTRICT, so a missing
+    // location row can only mean a corrupted database.
+    std::optional<KnownLocation> startLocation =
+      findKnownLocation(*db_, startLocationName);
+    std::optional<KnownLocation> currentLocation =
+      findKnownLocation(*db_, currentLocationName);
+    if (!startLocation.has_value() || !currentLocation.has_value()) {
+      logger_.error("loadRobot: robot references a missing known location");
+      throw RepositoryException("robot references a missing known location ('" +
+                                startLocationName + "' / '" +
+                                currentLocationName + "')");
     }
 
-    KnownLocation location;
-    if (locationName.has_value()) {
-      auto loaded = loadKnownLocationByName(*locationName);
-      if (loaded.has_value()) {
-        location = *loaded;
-      }
-    }
-
-    Robot robot(name, location);
+    Robot robot(name, *startLocation);
+    robot.setKnownLocation(*currentLocation);
 
     // Resolve which object, if any, each hand holds by scanning
-    // object_state for held_by_robot_hand entries.
+    // object_state for held_by_robot_hand entries. The unique index
+    // on held_by_robot_hand guarantees at most one row per hand.
     for (RobotHand hand : {RobotHand::LEFT, RobotHand::RIGHT}) {
       SQLite::Statement handStmt(*db_, "SELECT o.name FROM object_state os "
         "JOIN object o ON os.object_id = o.id "
@@ -1402,6 +1480,73 @@ Robot KnowledgeRepository::loadRobot()
   } catch (const SQLite::Exception & e) {
     logger_.error(std::string("loadRobot failed: ") + e.what());
     throw RepositoryException(std::string("loadRobot failed: ") + e.what());
+  }
+}
+
+// ---------------------------------------------------------------------
+// Run-state reset
+// ---------------------------------------------------------------------
+
+void KnowledgeRepository::resetRuntimeState()
+{
+  try {
+    SQLite::Transaction transaction(*db_);
+
+    // 1. Objects: every ownership becomes unknown (all three owner
+    //    columns NULL). Doing this first means no object refers to a
+    //    person or to a robot hand by the time persons are removed.
+    //    This also frees both of the robot's hands, since hands are
+    //    derived from object_state.
+    db_->exec("UPDATE object_state SET location_name = NULL, "
+              "held_by_person_id = NULL, held_by_robot_hand = NULL");
+
+    // 2. Objects: remove the navigable and grasp pose rows. The
+    //    objects owned them exclusively, and object.nav_pose_id /
+    //    manip_pose_id are ON DELETE SET NULL, so the columns clear
+    //    themselves. The objects themselves are NOT deleted.
+    db_->exec("DELETE FROM pose_3d WHERE id IN ("
+              "SELECT nav_pose_id FROM object WHERE nav_pose_id IS NOT NULL "
+              "UNION SELECT manip_pose_id FROM object WHERE manip_pose_id IS "
+              "NOT NULL)");
+
+    // 3. Persons: remove every navigable pose row (hosts included: a
+    //    host's pose is unknown at the start of a run; person.nav_pose_id
+    //    is ON DELETE SET NULL).
+    db_->exec("DELETE FROM pose_3d WHERE id IN ("
+              "SELECT nav_pose_id FROM person WHERE nav_pose_id IS NOT NULL)");
+
+    // 4. Persons: delete every person except HOST, together with the
+    //    description rows they owned. person_order rows go with them
+    //    (ON DELETE CASCADE). KnownLocation rows are left alone.
+    //    "NOT IN (subquery)" also behaves correctly when no HOST
+    //    category row exists yet (then every person is deleted).
+    const std::string hostName = personTypeToText(PersonType::HOST);
+
+    SQLite::Statement dropDescriptions(
+      *db_,
+      "DELETE FROM person_description WHERE id IN ("
+      "SELECT description_id FROM person WHERE description_id IS NOT NULL "
+      "AND category_id NOT IN "
+      "(SELECT id FROM person_category WHERE name = ?))");
+    dropDescriptions.bind(1, hostName);
+    dropDescriptions.exec();
+
+    SQLite::Statement dropPersons(
+      *db_, "DELETE FROM person WHERE category_id NOT IN "
+      "(SELECT id FROM person_category WHERE name = ?)");
+    dropPersons.bind(1, hostName);
+    dropPersons.exec();
+
+    // 5. Robot: the current location goes back to the start location.
+    //    If no robot is stored, this updates zero rows.
+    db_->exec("UPDATE robot SET location_name = start_location_name "
+              "WHERE id = 1");
+
+    transaction.commit();
+  } catch (const SQLite::Exception & e) {
+    logger_.error(std::string("resetRuntimeState failed: ") + e.what());
+    throw RepositoryException(std::string("resetRuntimeState failed: ") +
+                              e.what());
   }
 }
 

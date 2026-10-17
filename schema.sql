@@ -1,5 +1,24 @@
--- schema.sql (v4)
+-- schema.sql (v5)
 -- SQLite schema for the Justina knowledge_bank world-state database.
+-- v5 changes from v4 (knowledge base update):
+--   - known_location.zone (NOT NULL, one of the four LocationZone
+--     values): every known location belongs to exactly one zone.
+--   - object.usual_zone (NOT NULL, same four values): knowledge about
+--     where this object is usually found. It is knowledge, not run
+--     state: it survives restarts and is never touched by the
+--     startup reset.
+--   - robot.start_location_name (NOT NULL): the place where the robot
+--     always starts. robot.location_name (the current location) is
+--     now NOT NULL too: a robot always has a current location.
+--   - object_state exclusive-arc: "exactly one" became "at most one".
+--     No reference populated means the ownership is UNKNOWN. This
+--     also makes ON DELETE SET NULL on location_name and
+--     held_by_person_id safe: removing a person or a location leaves
+--     the objects that pointed at it as unknown, instead of violating
+--     the CHECK.
+--   - A hand can hold at most one object (partial unique index on
+--     object_state.held_by_robot_hand).
+--   - OBJECT_TYPICAL_LOCATION is no longer omitted: it is object.usual_zone.
 -- v4 changes from v3:
 --   - person.photo (nullable BLOB) added, to store a person's photo
 --     directly in the database. NULL (not an empty blob) means "no
@@ -22,10 +41,10 @@
 -- against an already-initialized database file, without failing on
 -- "table already exists".
 --
--- OBJECT_TYPICAL_LOCATION (static "where objects are usually found",
--- for GPSR search-without-a-hint tasks) intentionally omitted for now.
--- It is purely additive and can be added later without touching
--- anything below.
+-- IMPORTANT: IF NOT EXISTS does NOT alter a table that already exists
+-- with an older layout. A database file created with schema v4 or
+-- earlier must be deleted once before running with v5 (the new
+-- NOT NULL columns cannot be added to existing tables).
 
 PRAGMA foreign_keys = ON;
 
@@ -47,22 +66,35 @@ CREATE TABLE IF NOT EXISTS pose_3d (
 -- ---------------------------------------------------------------------
 -- KNOWN_LOCATION
 -- name is the natural key (matches how locations are referred to
--- everywhere else: phrases, dictionaries, YAML seeds).
+-- everywhere else: phrases, dictionaries, YAML seeds). zone is the
+-- large zone the place belongs to; the allowed values mirror the
+-- LocationZone enumeration in code (a fixed list, like
+-- ObjectCategory and PersonType).
 -- ---------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS known_location (
     name        TEXT PRIMARY KEY,
-    pose_id     INTEGER REFERENCES pose_3d(id) ON DELETE SET NULL
+    pose_id     INTEGER REFERENCES pose_3d(id) ON DELETE SET NULL,
+    zone        TEXT NOT NULL
+                CHECK (zone IN ('kitchen', 'living_room', 'bedroom', 'laundry'))
 );
+
+CREATE INDEX IF NOT EXISTS idx_known_location_zone ON known_location(zone);
 
 -- ---------------------------------------------------------------------
 -- ROBOT
 -- Singleton table (CHECK id = 1 enforces a single row).
--- left/right hand are NOT columns here anymore -- see object_state.
+-- left/right hand are NOT columns here -- see object_state.
+-- start_location_name is knowledge (where the robot always starts);
+-- location_name is run state (where it is now) and is reset to
+-- start_location_name at every startup.
+-- Both are RESTRICT: a location the robot starts at or stands in
+-- cannot be removed from under it.
 -- ---------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS robot (
-    id              INTEGER PRIMARY KEY CHECK (id = 1),
-    name            TEXT NOT NULL,
-    location_name   TEXT REFERENCES known_location(name) ON DELETE SET NULL
+    id                    INTEGER PRIMARY KEY CHECK (id = 1),
+    name                  TEXT NOT NULL,
+    start_location_name   TEXT NOT NULL REFERENCES known_location(name) ON DELETE RESTRICT,
+    location_name         TEXT NOT NULL REFERENCES known_location(name) ON DELETE RESTRICT
 );
 
 -- ---------------------------------------------------------------------
@@ -83,11 +115,16 @@ CREATE TABLE IF NOT EXISTS person_category (
 -- name is globally unique: the domain (ManipulableObject.getName(),
 -- KnowledgeRepository.loadObjectByName(String)) treats name alone as
 -- identity, with no category disambiguation.
+-- name, category_id and usual_zone are knowledge (kept across
+-- restarts). nav_pose_id and manip_pose_id are run state (cleared at
+-- every startup); so is the matching object_state row.
 -- ---------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS object (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,
     name            TEXT NOT NULL UNIQUE,
     category_id     INTEGER NOT NULL REFERENCES object_category(id) ON DELETE RESTRICT,
+    usual_zone      TEXT NOT NULL
+                    CHECK (usual_zone IN ('kitchen', 'living_room', 'bedroom', 'laundry')),
     nav_pose_id     INTEGER REFERENCES pose_3d(id) ON DELETE SET NULL,
     manip_pose_id   INTEGER REFERENCES pose_3d(id) ON DELETE SET NULL
 );
@@ -139,9 +176,14 @@ CREATE INDEX IF NOT EXISTS idx_person_category ON person(category_id);
 
 -- ---------------------------------------------------------------------
 -- OBJECT_STATE
--- Exclusive-arc: an object's current "owner" is exactly one of
--- a known_location, a person, or one of the robot's hands.
--- 1:1 with object (object_id is both PK and FK).
+-- Exclusive-arc: an object's current "owner" is at most one of a
+-- known_location, a person, or one of the robot's hands. No column
+-- populated means the ownership is UNKNOWN (ObjectOwnership::unknown()).
+-- 1:1 with object (object_id is both PK and FK): every object always
+-- has a row, possibly with all three columns NULL.
+-- Because "none" is a valid state, ON DELETE SET NULL on location_name
+-- and held_by_person_id turns the affected objects into unknown
+-- instead of violating the CHECK.
 -- ---------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS object_state (
     object_id           INTEGER PRIMARY KEY REFERENCES object(id) ON DELETE CASCADE,
@@ -151,12 +193,18 @@ CREATE TABLE IF NOT EXISTS object_state (
     CHECK (
         (location_name      IS NOT NULL) +
         (held_by_person_id  IS NOT NULL) +
-        (held_by_robot_hand IS NOT NULL) = 1
+        (held_by_robot_hand IS NOT NULL) <= 1
     )
 );
 
 CREATE INDEX IF NOT EXISTS idx_object_state_location ON object_state(location_name);
 CREATE INDEX IF NOT EXISTS idx_object_state_person   ON object_state(held_by_person_id);
+
+-- A hand holds at most one object. Replaces the rule that the old
+-- initial-state loader used to validate ("no hand may hold two objects").
+CREATE UNIQUE INDEX IF NOT EXISTS idx_object_state_robot_hand
+    ON object_state(held_by_robot_hand)
+    WHERE held_by_robot_hand IS NOT NULL;
 
 -- ---------------------------------------------------------------------
 -- PERSON_ORDER

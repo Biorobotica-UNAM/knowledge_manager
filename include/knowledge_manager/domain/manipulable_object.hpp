@@ -1,5 +1,6 @@
 #pragma once
 
+#include "knowledge_manager/domain/location_zone.hpp"
 #include "knowledge_manager/domain/object_category.hpp"
 #include "knowledge_manager/domain/object_ownership.hpp"
 #include "knowledge_manager/domain/pose3d.hpp"
@@ -12,16 +13,18 @@ namespace knowledge_manager::domain
 
 class ManipulableObject {
 public:
-  ManipulableObject();
   ManipulableObject(
     std::string name, ObjectCategory category,
-    ObjectOwnership ownership);
+    LocationZone usualZone, ObjectOwnership ownership);
 
   std::string getName() const;
   void setName(const std::string & name);
 
   ObjectCategory getCategory() const;
   void setCategory(ObjectCategory category);
+
+  LocationZone getUsualZone() const;
+  void setUsualZone(LocationZone zone);
 
   ObjectOwnership getOwnership() const;
   void setOwnership(const ObjectOwnership & ownership);
@@ -33,11 +36,15 @@ public:
   void setGraspPose(const Pose3D & pose);
 
 private:
+  // Knowledge: stable, persists across restarts.
   std::string name_;
   ObjectCategory category_;
-  ObjectOwnership ownership_; // siempre existe -> composición por valor
-  std::optional<Pose3D> navigablePose_; // puede no existir -> optional
-  std::optional<Pose3D> graspPose_;     // puede no existir -> optional
+  LocationZone usualZone_;
+
+  // Run state: unknown at the start of every run.
+  ObjectOwnership ownership_;
+  std::optional<Pose3D> navigablePose_;
+  std::optional<Pose3D> graspPose_;
 };
 
 } // namespace knowledge_manager::domain

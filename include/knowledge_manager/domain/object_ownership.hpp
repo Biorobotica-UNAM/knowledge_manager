@@ -10,10 +10,12 @@ namespace knowledge_manager::domain
 
 class ObjectOwnership {
 public:
+  static ObjectOwnership unknown();
   static ObjectOwnership atLocation(std::string locationName);
   static ObjectOwnership heldByPerson(std::string personName);
   static ObjectOwnership heldByRobot(RobotHand hand);
 
+  bool isUnknown() const;
   bool isAtLocation() const;
   bool isHeldByPerson() const;
   bool isHeldByRobot() const;
@@ -23,6 +25,7 @@ public:
   RobotHand getRobotHand() const;
 
 private:
+  struct Unknown {};
   struct AtLocation
   {
     std::string name;
@@ -31,8 +34,13 @@ private:
   {
     std::string name;
   };
+  struct HeldByRobot
+  {
+    RobotHand hand;
+  };
 
-  using Ownership = std::variant<AtLocation, HeldByPerson, RobotHand>;
+  using Ownership =
+    std::variant<Unknown, AtLocation, HeldByPerson, HeldByRobot>;
 
   explicit ObjectOwnership(Ownership ownership);
   Ownership ownership_;

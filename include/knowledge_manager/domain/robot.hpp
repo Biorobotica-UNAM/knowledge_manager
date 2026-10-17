@@ -13,11 +13,13 @@ namespace knowledge_manager::domain
 
 class Robot {
 public:
-  Robot();
-  Robot(std::string name, KnownLocation knownLocation);
+  Robot(std::string name, KnownLocation startLocation);
 
   std::string getName() const;
   void setName(const std::string & name);
+
+  KnownLocation getStartLocation() const;
+  void setStartLocation(const KnownLocation & startLocation);
 
   KnownLocation getKnownLocation() const;
   void setKnownLocation(const KnownLocation & knownLocation);
@@ -26,8 +28,12 @@ public:
   void setObjectInHand(RobotHand hand, std::optional<ManipulableObject> object);
 
 private:
+  // Knowledge: stable, persists across restarts.
   std::string name_;
-  KnownLocation knownLocation_;
+  KnownLocation startLocation_;
+
+  // Run state: reset at the start of every run.
+  KnownLocation currentLocation_;
   std::array<std::optional<ManipulableObject>, 2> handObjects_;
 };
 

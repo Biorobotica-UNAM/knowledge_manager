@@ -56,7 +56,6 @@ set(PERSISTENCE_SOURCES
 
 add_library(knowledge_manager_core
   ${DOMAIN_SOURCES}
-  # ${CONFIG_SOURCES}
   ${PERSISTENCE_SOURCES}
 )
 

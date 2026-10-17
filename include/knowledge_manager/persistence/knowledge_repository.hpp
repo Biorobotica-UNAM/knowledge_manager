@@ -6,6 +6,7 @@
 #include <vector>
 
 #include "knowledge_manager/domain/known_location.hpp"
+#include "knowledge_manager/domain/location_zone.hpp"
 #include "knowledge_manager/domain/manipulable_object.hpp"
 #include "knowledge_manager/domain/object_category.hpp"
 #include "knowledge_manager/domain/person.hpp"
@@ -28,11 +29,19 @@ namespace knowledge_manager::persistence
 {
 
 /// Gives the illusion of an in-memory collection of Robot,
-/// ManipulableObject, and Person instances, while hiding that they
-/// are actually persisted in a SQLite relational database. It is the
-/// sole point of translation between the in-memory domain classes and
-/// their relational representation, and the sole component
-/// responsible for surviving a process restart.
+/// ManipulableObject, Person and KnownLocation instances, while hiding
+/// that they are actually persisted in a SQLite relational database. It
+/// is the sole point of translation between the in-memory domain
+/// classes and their relational representation, and the sole component
+/// that knows the schema, foreign keys, deletion order and
+/// transactions.
+///
+/// What survives a process restart is knowledge: KnownLocation entries
+/// (with their zone), each object's name, category and usual zone, the
+/// robot's name and start location, and persons of type HOST.
+/// Everything that is run state (object ownership and poses, the
+/// robot's current location and hands, non-host persons) is reset at
+/// startup through a single operation, resetRuntimeState.
 ///
 /// Error-handling strategy (see class-level notes on Logger and
 /// RepositoryException):
@@ -53,9 +62,11 @@ public:
   /// Opens (creating if necessary) the SQLite database at dbPath, and
   /// ensures the schema exists by executing the .sql file found at
   /// schemaPath (idempotent: safe to run against an already-
-  /// initialized database, via "CREATE TABLE IF NOT EXISTS"). logger
-  /// is used to record infrastructure-level events; it is expected to
-  /// outlive this repository.
+  /// initialized database, via "CREATE TABLE IF NOT EXISTS"). A
+  /// database file created with an older schema version is not
+  /// migrated; it must be deleted once. logger is used to record
+  /// infrastructure-level events; it is expected to outlive this
+  /// repository.
   KnowledgeRepository(
     const std::string & dbPath, const std::string & schemaPath,
     Logger & logger);
@@ -69,40 +80,43 @@ public:
 
   // -- Robot ---------------------------------------------------------
 
-  /// Persists the robot's current state to the database, replacing
-  /// any previously stored state (there is only ever one robot).
-  /// Whichever hand holds an object, if any, is reflected in that
-  /// object's own ObjectOwnership when it is separately loaded.
+  /// Persists the robot's current state to the database, including its
+  /// start location, replacing any previously stored state (there is
+  /// only ever one robot). Whichever hand holds an object, if any, is
+  /// reflected in that object's own ObjectOwnership when it is
+  /// separately loaded.
   void saveRobot(const domain::Robot & robot);
 
   /// Reconstructs and returns the robot's state from the database,
   /// including resolving which ManipulableObject, if any, each hand
-  /// currently holds.
-  domain::Robot loadRobot();
+  /// currently holds. Returns std::nullopt if no robot has been stored
+  /// yet: there is no meaningful "empty" Robot to return.
+  std::optional<domain::Robot> loadRobot();
 
   // -- ManipulableObject ----------------------------------------------
 
   /// Inserts or updates a manipulable object in the database,
-  /// including persisting its current ObjectOwnership (location,
-  /// person, or robot hand) as the object's exclusive-arc state.
+  /// including its usual zone and its current ObjectOwnership
+  /// (unknown, location, person, or robot hand) as the object's
+  /// exclusive-arc state.
   /// If an object with the same name already exists it is updated in
   /// place (upsert, never delete-and-reinsert) and keeps its original
   /// registration position; a new object is registered at the end of
   /// the order. A null pose on the argument keeps the stored pose.
   void saveObject(const domain::ManipulableObject & object);
 
-  /// Retrieves a manipulable object by name, reconstructing its
-  /// current ObjectOwnership from the exclusive-arc state. Returns
-  /// std::nullopt if no object exists with that name.
+  /// Retrieves a manipulable object by name, reconstructing its usual
+  /// zone and its current ObjectOwnership from the stored state.
+  /// Returns std::nullopt if no object exists with that name.
   std::optional<domain::ManipulableObject>
   loadObjectByName(const std::string & name);
 
   /// Retrieves all manipulable objects belonging to the given
-  /// category, each with its current ObjectOwnership resolved.
-  /// Objects are returned in order of first registration (FIFO),
-  /// regardless of their current ObjectOwnership. This order is part
-  /// of the contract: WorldStateService::getObjectByCategoryAndPosition
-  /// depends on it.
+  /// category, each with its usual zone and current ObjectOwnership
+  /// resolved. Objects are returned in order of first registration
+  /// (FIFO), regardless of their current ObjectOwnership. This order
+  /// is part of the contract:
+  /// WorldStateService::getObjectByCategoryAndPosition depends on it.
   std::vector<domain::ManipulableObject>
   loadObjectsByCategory(domain::ObjectCategory category);
 
@@ -145,12 +159,16 @@ public:
 
   /// Removes a person (and the description and pose rows they owned)
   /// from the database by name. Shifts the position of persons
-  /// registered after them.
+  /// registered after them. Any object that person was holding becomes
+  /// ObjectOwnership::unknown() (done by the schema's ON DELETE SET
+  /// NULL on object_state), so no object keeps referring to a person
+  /// that no longer exists.
   void deletePerson(const std::string & name);
 
   // -- KnownLocation -----------------------------------------------
 
-  /// Inserts or updates a known location in the database.
+  /// Inserts or updates a known location in the database, including
+  /// its zone.
   void saveKnownLocation(const domain::KnownLocation & location);
 
   /// Retrieves a known location by name. Returns std::nullopt if none
@@ -160,6 +178,32 @@ public:
 
   /// Retrieves every known location currently stored.
   std::vector<domain::KnownLocation> loadAllKnownLocations();
+
+  /// Retrieves every known location belonging to the given zone.
+  /// Returns an empty vector if the zone has none.
+  std::vector<domain::KnownLocation>
+  loadKnownLocationsByZone(domain::LocationZone zone);
+
+  // -- Run-state reset ---------------------------------------------
+
+  /// Resets, in a single transaction, everything that is unknown at
+  /// the beginning of a run, and keeps everything that is knowledge:
+  ///   - Robot: its current location goes back to its start location
+  ///     and both hands are free. If no robot is stored, nothing is
+  ///     done.
+  ///   - Persons: every person except those of type HOST is deleted
+  ///     (with the description and pose rows they owned). Surviving
+  ///     hosts keep their name, description and photo; their
+  ///     navigable pose is cleared.
+  ///   - Objects: none is deleted. Each keeps its name, category and
+  ///     usual zone; its ownership becomes unknown and its navigable
+  ///     and grasp poses are removed.
+  ///   - KnownLocation entries are never touched.
+  /// On any failure the transaction is rolled back, leaving the
+  /// database exactly as it was, and RepositoryException is thrown.
+  /// The order in which things are cleared (ownership before persons)
+  /// is an internal detail of this method.
+  void resetRuntimeState();
 
 private:
   std::unique_ptr<SQLite::Database> db_;
