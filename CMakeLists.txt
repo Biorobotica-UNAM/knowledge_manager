@@ -47,16 +47,18 @@ set(DOMAIN_SOURCES
   src/domain/robot.cpp
 )
 
-# set(CONFIG_SOURCES
-# )
-
 set(PERSISTENCE_SOURCES
   src/persistence/knowledge_repository.cpp
+)
+
+set(APPLICATION_SOURCES
+  src/application/world_state_service.cpp
 )
 
 add_library(knowledge_manager_core
   ${DOMAIN_SOURCES}
   ${PERSISTENCE_SOURCES}
+  ${APPLICATION_SOURCES}
 )
 
 target_include_directories(knowledge_manager_core PUBLIC
@@ -126,6 +128,7 @@ if(BUILD_TESTING)
 
   ament_add_gtest(test_knowledge_repository
     test/test_knowledge_repository.cpp
+    test/test_world_state_service.cpp
   )
   target_link_libraries(test_knowledge_repository
     knowledge_manager_core
