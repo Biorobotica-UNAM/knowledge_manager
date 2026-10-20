@@ -8,8 +8,9 @@ endif()
 # Dependencies
 find_package(ament_cmake REQUIRED)
 find_package(rclcpp REQUIRED)
-find_package(ament_index_cpp REQUIRED)
 find_package(knowledge_interfaces REQUIRED)
+find_package(geometry_msgs REQUIRED)
+find_package(ament_index_cpp REQUIRED)
 find_package(yaml-cpp REQUIRED)
 
 # ── SQLiteCpp (KnowledgeRepository's persistence backend) ───────────
@@ -55,10 +56,16 @@ set(APPLICATION_SOURCES
   src/application/world_state_service.cpp
 )
 
+set(ADAPTER_SOURCES
+  src/ros_adapter/message_conversions.cpp
+  src/ros_adapter/ros_manager.cpp
+)
+
 add_library(knowledge_manager_core
   ${DOMAIN_SOURCES}
   ${PERSISTENCE_SOURCES}
   ${APPLICATION_SOURCES}
+  ${ADAPTER_SOURCES}
 )
 
 target_include_directories(knowledge_manager_core PUBLIC
@@ -71,6 +78,9 @@ target_compile_features(knowledge_manager_core PUBLIC cxx_std_17)
 ament_target_dependencies(knowledge_manager_core
   ament_index_cpp
   yaml-cpp
+  rclcpp
+  geometry_msgs
+  knowledge_interfaces
 )
 
 target_link_libraries(knowledge_manager_core
@@ -129,9 +139,14 @@ if(BUILD_TESTING)
   ament_add_gtest(test_knowledge_repository
     test/test_knowledge_repository.cpp
     test/test_world_state_service.cpp
+    test/test_message_conversions.cpp
   )
   target_link_libraries(test_knowledge_repository
     knowledge_manager_core
+  )
+
+  ament_target_dependencies(test_knowledge_repository
+    rclcpp geometry_msgs knowledge_interfaces
   )
   # Gives the test an absolute, always-correct path to schema.sql,
   # regardless of the working directory ctest/colcon test invokes the

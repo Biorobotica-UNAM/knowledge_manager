@@ -11,12 +11,14 @@
 
   <depend>rclcpp</depend>
   <depend>knowledge_interfaces</depend>
+  <depend>geometry_msgs</depend>
+  <depend>ament_index_cpp</depend>
   <depend>yaml-cpp</depend>
   <depend>nlohmann_json</depend>
-  <depend>ament_index_cpp</depend>
 
   <test_depend>ament_lint_auto</test_depend>
   <test_depend>ament_lint_common</test_depend>
+  <test_depend>ament_cmake_gtest</test_depend>
 
   <export>
     <build_type>ament_cmake</build_type>

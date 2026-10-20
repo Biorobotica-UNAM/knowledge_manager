@@ -1,19 +1,50 @@
-// src/main.cpp
-#include "knowledge_manager/domain/known_location.hpp"
-#include "knowledge_manager/domain/location_zone.hpp"
-#include "knowledge_manager/domain/pose3d.hpp"
+#include <memory>
+#include <string>
 
-#include <iostream>
+#include "ament_index_cpp/get_package_share_directory.hpp"
+#include "rclcpp/rclcpp.hpp"
 
-int main()
+#include "knowledge_manager/application/world_state_service.hpp"
+#include "knowledge_manager/persistence/knowledge_repository.hpp"
+#include "knowledge_manager/persistence/repository_exception.hpp"
+#include "knowledge_manager/ros_adapter/ros_logger.hpp"
+#include "knowledge_manager/ros_adapter/ros_manager.hpp"
+
+// Wires the package together, in the order its layers depend on each
+// other: logger -> repository -> world state service -> ROS services.
+int main(int argc, char **argv)
 {
-  using namespace knowledge_manager::domain;
+  rclcpp::init(argc, argv);
 
-  Pose3D pose(1.0f, 2.0f, 0.0f, 0.0f, 0.0f, 0.0f, 1.0f);
-  KnownLocation kitchen_table("dinner_table", pose, LocationZone::KITCHEN);
+  auto node = std::make_shared<rclcpp::Node>("knowledge_manager_node");
+  knowledge_manager::ros_adapter::RosLogger logger(node->get_logger());
 
-  std::cout << "Location: " << kitchen_table.getName()
-            << " x=" << kitchen_table.getPose().getX() << std::endl;
+  const std::string databasePath = node->declare_parameter<std::string>(
+      "database_path", "knowledge_base.db");
+  const std::string schemaPath = node->declare_parameter<std::string>(
+      "schema_path",
+      ament_index_cpp::get_package_share_directory("knowledge_manager") +
+          "/schema.sql");
 
+  try {
+    knowledge_manager::persistence::KnowledgeRepository repository(
+      databasePath, schemaPath, logger);
+    knowledge_manager::application::WorldStateService world(repository);
+    knowledge_manager::ros_adapter::ROSManager manager(node, world, logger);
+
+    if (manager.initialize().isFailure()) {
+      rclcpp::shutdown();
+      return 1;
+    }
+    // Single-threaded on purpose: the repository is not thread-safe.
+    rclcpp::spin(node);
+  } catch (const knowledge_manager::persistence::RepositoryException & e) {
+    logger.error(std::string("the knowledge base could not be opened: ") +
+                 e.what());
+    rclcpp::shutdown();
+    return 1;
+  }
+
+  rclcpp::shutdown();
   return 0;
 }

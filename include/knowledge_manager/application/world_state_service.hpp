@@ -1,5 +1,7 @@
 #pragma once
 
+#include <cstddef>
+#include <functional>
 #include <string>
 #include <vector>
 
@@ -10,7 +12,10 @@
 #include "knowledge_manager/domain/object_category.hpp"
 #include "knowledge_manager/domain/person.hpp"
 #include "knowledge_manager/domain/person_type.hpp"
+#include "knowledge_manager/domain/physical_description.hpp"
+#include "knowledge_manager/domain/pose3d.hpp"
 #include "knowledge_manager/domain/robot.hpp"
+#include "knowledge_manager/domain/robot_hand.hpp"
 #include "knowledge_manager/persistence/knowledge_repository.hpp"
 
 namespace knowledge_manager::application
@@ -39,9 +44,15 @@ namespace knowledge_manager::application
 /// save, so that it cannot be left half-applied; this class does not
 /// repeat it.
 ///
-/// Positions are 1-based and follow first registration order,
-/// regardless of current ownership; they are not stable across
-/// deletions (see KnowledgeRepository::deleteObject).
+/// References. Wherever a method takes a "reference" to an object or a
+/// person, it accepts either the real name ("apple", "Ana") or a
+/// positional alias "<kind>_<n>" ("fruits_1", "guest_2", "host_1"),
+/// where <kind> is the lower-case ObjectCategory or PersonType name and
+/// n is the 1-based position in first registration order, regardless
+/// of current ownership. Positions are not stable across deletions
+/// (see KnowledgeRepository::deleteObject). To keep a reference
+/// unambiguous, no object or person may be named like an alias; saving
+/// one with such a name fails.
 class WorldStateService {
 public:
   /// repository must outlive this service; it is not owned.
@@ -77,6 +88,77 @@ public:
   Result<void> createOrUpdatePerson(const domain::Person & person);
   Result<void> deletePerson(const std::string & name);
 
+  // -- References: name or positional alias ----------------------------
+  Result<domain::ManipulableObject> resolveObject(const std::string & reference);
+  Result<domain::Person> resolvePerson(const std::string & reference);
+  Result<domain::Person> resolvePersonWithPhoto(const std::string & reference);
+
+  // -- Knowledge: what the robot knows across restarts -------------------
+  /// Registers an object by what it is: name, category and usual zone.
+  /// A new object starts with unknown ownership and no poses. If the
+  /// object already exists only its category and usual zone change; its
+  /// run state is kept.
+  Result<void> registerObject(
+    const std::string & name,
+    domain::ObjectCategory category,
+    domain::LocationZone usualZone);
+
+  /// Registers a person at a known location. If the person already
+  /// exists only the type and the location change.
+  Result<void> registerPerson(
+    const std::string & name, domain::PersonType type,
+    const std::string & locationName);
+
+  // -- Run state of objects ---------------------------------------------
+  // Each of these states one fact about an object. Reading the object,
+  // changing it and saving it happen here, in one place, so that callers
+  // never do that round trip themselves.
+  Result<void> setObjectAtLocation(
+    const std::string & objectReference,
+    const std::string & locationName);
+  Result<void> setObjectHeldByPerson(
+    const std::string & objectReference,
+    const std::string & personReference);
+  /// Fails when that hand already holds a different object.
+  Result<void> setObjectHeldByRobot(
+    const std::string & objectReference,
+    domain::RobotHand hand);
+  Result<void> forgetObjectOwnership(const std::string & objectReference);
+  Result<void> setObjectNavigablePose(
+    const std::string & objectReference,
+    const domain::Pose3D & pose);
+  Result<void> setObjectGraspPose(
+    const std::string & objectReference,
+    const domain::Pose3D & pose);
+
+  // -- Run state of the robot --------------------------------------------
+  Result<void> setRobotLocation(const std::string & locationName);
+
+  // -- Run state of persons ----------------------------------------------
+  Result<void> setPersonType(
+    const std::string & personReference,
+    domain::PersonType type);
+  Result<void> setPersonLocation(
+    const std::string & personReference,
+    const std::string & locationName);
+  Result<void> setPersonNavigablePose(
+    const std::string & personReference,
+    const domain::Pose3D & pose);
+  Result<void>
+  setPersonDescription(
+    const std::string & personReference,
+    const domain::PhysicalDescription & description);
+  Result<void> setPersonPhoto(
+    const std::string & personReference,
+    const std::vector<std::byte> & photo);
+  Result<void> setPersonFavoriteDrink(
+    const std::string & personReference,
+    const std::string & drink);
+  /// objectReferences are resolved in order; if one fails nothing changes.
+  Result<void> setPersonOrder(
+    const std::string & personReference,
+    const std::vector<std::string> & objectReferences);
+
   // -- KnownLocation ---------------------------------------------------
   Result<domain::KnownLocation> getKnownLocationByName(const std::string & name);
   Result<std::vector<domain::KnownLocation>> getAllKnownLocations();
@@ -92,9 +174,31 @@ public:
 private:
   persistence::KnowledgeRepository & repository_;
 
-  /// Checks that the owner named by the object's ownership exists.
-  /// Returns an empty string when it does, else the reason.
-  std::string findOwnershipProblem(const domain::ManipulableObject & object);
+  /// Returns an empty string when the object can be saved, else why not:
+  /// its name looks like an alias, or its ownership refers to a known
+  /// location or person that does not exist, or to a hand that already
+  /// holds a different object.
+  std::string findObjectProblem(const domain::ManipulableObject & object);
+
+  /// Same for persons: only the name rule applies.
+  std::string findPersonProblem(const domain::Person & person);
+
+  Result<void>
+  changeObject(
+    const std::string & reference,
+    const std::function<void(domain::ManipulableObject &)> & change);
+  /// Unlike changeObject, the change returns the new Person, because
+  /// Person has no setters for its type or location.
+  Result<void> changePerson(
+    const std::string & reference,
+    const std::function<domain::Person(const domain::Person &)> & change);
+
+  /// A copy of person with another type and location (Person has no
+  /// setter for its type).
+  static domain::Person rebuiltPerson(
+    const domain::Person & person,
+    domain::PersonType type,
+    const domain::KnownLocation & location);
 };
 
 } // namespace knowledge_manager::application

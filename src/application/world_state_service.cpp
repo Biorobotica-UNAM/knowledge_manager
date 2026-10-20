@@ -1,6 +1,10 @@
 #include "knowledge_manager/application/world_state_service.hpp"
 
+#include <algorithm>
+#include <array>
+#include <cctype>
 #include <optional>
+#include <stdexcept>
 #include <utility>
 
 #include "knowledge_manager/persistence/repository_exception.hpp"
@@ -15,8 +19,8 @@ namespace
 {
 
 // The only place that converts the repository's exception into the
-// service's error channel. Every public method below is one call to
-// guarded() or guardedVoid(), so none repeats the try/catch.
+// service's error channel. Every public method below ends up in one
+// call to guarded() or guardedVoid(), so none repeats the try/catch.
 template<typename T, typename Operation>
 Result<T> guarded(Operation operation)
 {
@@ -61,6 +65,169 @@ Result<T> atPosition(
   return Result<T>::success(std::move(items[position - 1]));
 }
 
+// -- Positional aliases: "<kind>_<n>" -----------------------------------
+
+std::string categoryAlias(ObjectCategory category)
+{
+  switch (category) {
+    case ObjectCategory::FRUITS:
+      return "fruits";
+    case ObjectCategory::TRASH:
+      return "trash";
+    case ObjectCategory::TABLEWARE:
+      return "tableware";
+    case ObjectCategory::CUTLERY:
+      return "cutlery";
+    case ObjectCategory::GROCERY:
+      return "grocery";
+    case ObjectCategory::DRINKS:
+      return "drinks";
+    case ObjectCategory::SNACKS:
+      return "snacks";
+    case ObjectCategory::BASKET:
+      return "basket";
+    case ObjectCategory::FOOD:
+      return "food";
+    case ObjectCategory::CLEANING_SUPPLY:
+      return "cleaning_supply";
+    case ObjectCategory::CONTAINERS:
+      return "containers";
+    case ObjectCategory::CONTAINER_DROP:
+      return "container_drop";
+    case ObjectCategory::ELECTRODOMESTICS:
+      return "electrodomestics";
+    case ObjectCategory::TOYS:
+      return "toys";
+    case ObjectCategory::FABRIC:
+      return "fabric";
+  }
+  throw std::logic_error("Unrecognized ObjectCategory value");
+}
+
+std::string personTypeAlias(PersonType type)
+{
+  switch (type) {
+    case PersonType::GUEST:
+      return "guest";
+    case PersonType::CUSTOMER:
+      return "customer";
+    case PersonType::HOST:
+      return "host";
+    case PersonType::USER:
+      return "user";
+  }
+  throw std::logic_error("Unrecognized PersonType value");
+}
+
+// Every enumerator, so that an alias can be mapped back to its value.
+// When a value is added to ObjectCategory or PersonType, the switch
+// above warns (-Wswitch); this list must be extended too.
+constexpr std::array<ObjectCategory, 15> kAllCategories{
+  ObjectCategory::FRUITS,
+  ObjectCategory::TRASH,
+  ObjectCategory::TABLEWARE,
+  ObjectCategory::CUTLERY,
+  ObjectCategory::GROCERY,
+  ObjectCategory::DRINKS,
+  ObjectCategory::SNACKS,
+  ObjectCategory::BASKET,
+  ObjectCategory::FOOD,
+  ObjectCategory::CLEANING_SUPPLY,
+  ObjectCategory::CONTAINERS,
+  ObjectCategory::CONTAINER_DROP,
+  ObjectCategory::ELECTRODOMESTICS,
+  ObjectCategory::TOYS,
+  ObjectCategory::FABRIC};
+
+constexpr std::array<PersonType, 4> kAllPersonTypes{
+  PersonType::GUEST, PersonType::CUSTOMER, PersonType::HOST,
+  PersonType::USER};
+
+struct AliasParts
+{
+  std::string kind;
+  int position;
+};
+
+// "fruits_2" -> {"fruits", 2}; anything else -> nullopt. Says nothing
+// about whether the kind exists.
+std::optional<AliasParts> splitAlias(const std::string & text)
+{
+  const std::size_t underscore = text.rfind('_');
+  if (underscore == std::string::npos || underscore == 0 ||
+    underscore + 1 >= text.size())
+  {
+    return std::nullopt;
+  }
+  const std::string digits = text.substr(underscore + 1);
+  const bool allDigits =
+    std::all_of(digits.begin(), digits.end(),
+      [](unsigned char c) {return std::isdigit(c) != 0;});
+  if (!allDigits || digits.size() > 6) {
+    return std::nullopt;
+  }
+  return AliasParts{text.substr(0, underscore), std::stoi(digits)};
+}
+
+struct ObjectAlias
+{
+  ObjectCategory category;
+  int position;
+};
+
+struct PersonAlias
+{
+  PersonType type;
+  int position;
+};
+
+std::optional<ObjectAlias> asObjectAlias(const std::string & text)
+{
+  const auto parts = splitAlias(text);
+  if (!parts.has_value()) {
+    return std::nullopt;
+  }
+  for (ObjectCategory category : kAllCategories) {
+    if (categoryAlias(category) == parts->kind) {
+      return ObjectAlias{category, parts->position};
+    }
+  }
+  return std::nullopt;
+}
+
+std::optional<PersonAlias> asPersonAlias(const std::string & text)
+{
+  const auto parts = splitAlias(text);
+  if (!parts.has_value()) {
+    return std::nullopt;
+  }
+  for (PersonType type : kAllPersonTypes) {
+    if (personTypeAlias(type) == parts->kind) {
+      return PersonAlias{type, parts->position};
+    }
+  }
+  return std::nullopt;
+}
+
+// Why this name cannot be used for an object or a person, or "".
+std::string nameProblem(const std::string & name)
+{
+  if (name.empty()) {
+    return "a name cannot be empty";
+  }
+  if (asObjectAlias(name).has_value() || asPersonAlias(name).has_value()) {
+    return "'" + name +
+           "' cannot be used as a name: it looks like a "
+           "positional alias";
+  }
+  return std::string();
+}
+
+std::string handText(RobotHand hand)
+{
+  return hand == RobotHand::LEFT ? "left" : "right";
+}
+
 } // namespace
 
 WorldStateService::WorldStateService(
@@ -79,6 +246,25 @@ Result<Robot> WorldStateService::getRobot()
 Result<void> WorldStateService::updateRobot(const Robot & robot)
 {
   return guardedVoid([&]() {repository_.saveRobot(robot);});
+}
+
+Result<void>
+WorldStateService::setRobotLocation(const std::string & locationName)
+{
+  return guarded<void>([&]() {
+             std::optional<Robot> robot = repository_.loadRobot();
+             if (!robot.has_value()) {
+               return Result<void>::failure("robot not found");
+             }
+             std::optional<KnownLocation> location =
+             repository_.loadKnownLocationByName(locationName);
+             if (!location.has_value()) {
+               return Result<void>::failure("known location not found: " + locationName);
+             }
+             robot->setKnownLocation(*location);
+             repository_.saveRobot(*robot);
+             return Result<void>::success();
+  });
 }
 
 // -- ManipulableObject -----------------------------------------------
@@ -112,11 +298,44 @@ WorldStateService::getObjectByCategoryAndPosition(
   });
 }
 
+Result<ManipulableObject>
+WorldStateService::resolveObject(const std::string & reference)
+{
+  if (const auto alias = asObjectAlias(reference)) {
+    return getObjectByCategoryAndPosition(alias->category, alias->position);
+  }
+  return getObjectByName(reference);
+}
+
+Result<void> WorldStateService::registerObject(
+  const std::string & name,
+  ObjectCategory category,
+  LocationZone usualZone)
+{
+  return guarded<void>([&]() {
+             const std::string problem = nameProblem(name);
+             if (!problem.empty()) {
+               return Result<void>::failure(problem);
+             }
+             std::optional<ManipulableObject> existing =
+             repository_.loadObjectByName(name);
+             if (existing.has_value()) {
+               existing->setCategory(category);
+               existing->setUsualZone(usualZone);
+               repository_.saveObject(*existing);
+             } else {
+               repository_.saveObject(ManipulableObject(name, category, usualZone,
+                                               ObjectOwnership::unknown()));
+             }
+             return Result<void>::success();
+  });
+}
+
 Result<void>
 WorldStateService::createOrUpdateObject(const ManipulableObject & object)
 {
   return guarded<void>([&]() {
-             const std::string problem = findOwnershipProblem(object);
+             const std::string problem = findObjectProblem(object);
              if (!problem.empty()) {
                return Result<void>::failure(problem);
              }
@@ -133,6 +352,69 @@ Result<void> WorldStateService::deleteObject(const std::string & name)
              }
              repository_.deleteObject(name);
              return Result<void>::success();
+  });
+}
+
+Result<void>
+WorldStateService::setObjectAtLocation(
+  const std::string & objectReference,
+  const std::string & locationName)
+{
+  return changeObject(objectReference, [&](ManipulableObject & object) {
+             object.setOwnership(ObjectOwnership::atLocation(locationName));
+  });
+}
+
+Result<void>
+WorldStateService::setObjectHeldByPerson(
+  const std::string & objectReference,
+  const std::string & personReference)
+{
+  const Result<Person> person = resolvePerson(personReference);
+  if (person.isFailure()) {
+    return Result<void>::failure(person.error());
+  }
+  const std::string personName = person.value().getName();
+  return changeObject(objectReference, [&](ManipulableObject & object) {
+             object.setOwnership(ObjectOwnership::heldByPerson(personName));
+  });
+}
+
+Result<void>
+WorldStateService::setObjectHeldByRobot(
+  const std::string & objectReference,
+  RobotHand hand)
+{
+  return changeObject(objectReference, [&](ManipulableObject & object) {
+             object.setOwnership(ObjectOwnership::heldByRobot(hand));
+  });
+}
+
+Result<void>
+WorldStateService::forgetObjectOwnership(const std::string & objectReference)
+{
+  return changeObject(objectReference, [](ManipulableObject & object) {
+             object.setOwnership(ObjectOwnership::unknown());
+  });
+}
+
+Result<void>
+WorldStateService::setObjectNavigablePose(
+  const std::string & objectReference,
+  const Pose3D & pose)
+{
+  return changeObject(objectReference, [&](ManipulableObject & object) {
+             object.setNavigablePose(pose);
+  });
+}
+
+Result<void>
+WorldStateService::setObjectGraspPose(
+  const std::string & objectReference,
+  const Pose3D & pose)
+{
+  return changeObject(objectReference, [&](ManipulableObject & object) {
+             object.setGraspPose(pose);
   });
 }
 
@@ -194,9 +476,54 @@ WorldStateService::getPersonByTypeAndPositionWithPhoto(
   });
 }
 
+Result<Person> WorldStateService::resolvePerson(const std::string & reference)
+{
+  if (const auto alias = asPersonAlias(reference)) {
+    return getPersonByTypeAndPosition(alias->type, alias->position);
+  }
+  return getPersonByName(reference);
+}
+
+Result<Person>
+WorldStateService::resolvePersonWithPhoto(const std::string & reference)
+{
+  if (const auto alias = asPersonAlias(reference)) {
+    return getPersonByTypeAndPositionWithPhoto(alias->type, alias->position);
+  }
+  return getPersonByNameWithPhoto(reference);
+}
+
+Result<void>
+WorldStateService::registerPerson(
+  const std::string & name, PersonType type,
+  const std::string & locationName)
+{
+  const std::string problem = nameProblem(name);
+  if (!problem.empty()) {
+    return Result<void>::failure(problem);
+  }
+  const Result<KnownLocation> location = getKnownLocationByName(locationName);
+  if (location.isFailure()) {
+    return Result<void>::failure(location.error());
+  }
+  return guardedVoid([&]() {
+             std::optional<Person> existing = repository_.loadPersonByName(name);
+             repository_.savePerson(
+        existing.has_value() ? rebuiltPerson(*existing, type, location.value()) :
+                               Person(name, type, location.value()));
+  });
+}
+
 Result<void> WorldStateService::createOrUpdatePerson(const Person & person)
 {
-  return guardedVoid([&]() {repository_.savePerson(person);});
+  return guarded<void>([&]() {
+             const std::string problem = findPersonProblem(person);
+             if (!problem.empty()) {
+               return Result<void>::failure(problem);
+             }
+             repository_.savePerson(person);
+             return Result<void>::success();
+  });
 }
 
 Result<void> WorldStateService::deletePerson(const std::string & name)
@@ -207,6 +534,99 @@ Result<void> WorldStateService::deletePerson(const std::string & name)
              }
              repository_.deletePerson(name);
              return Result<void>::success();
+  });
+}
+
+Result<void>
+WorldStateService::setPersonType(
+  const std::string & personReference,
+  PersonType type)
+{
+  return changePerson(personReference, [&](const Person & person) {
+             return rebuiltPerson(person, type, person.getKnownLocation());
+  });
+}
+
+Result<void>
+WorldStateService::setPersonLocation(
+  const std::string & personReference,
+  const std::string & locationName)
+{
+  const Result<KnownLocation> location = getKnownLocationByName(locationName);
+  if (location.isFailure()) {
+    return Result<void>::failure(location.error());
+  }
+  return changePerson(personReference, [&](const Person & person) {
+             return rebuiltPerson(person, person.getPersonType(), location.value());
+  });
+}
+
+Result<void>
+WorldStateService::setPersonNavigablePose(
+  const std::string & personReference,
+  const Pose3D & pose)
+{
+  return changePerson(personReference, [&](const Person & person) {
+             Person changed = person;
+             changed.setNavigablePose(pose);
+             return changed;
+  });
+}
+
+Result<void> WorldStateService::setPersonDescription(
+  const std::string & personReference,
+  const PhysicalDescription & description)
+{
+  return changePerson(personReference, [&](const Person & person) {
+             Person changed = person;
+             changed.setPhysicalDescription(description);
+             return changed;
+  });
+}
+
+Result<void>
+WorldStateService::setPersonPhoto(
+  const std::string & personReference,
+  const std::vector<std::byte> & photo)
+{
+  if (photo.empty()) {
+    return Result<void>::failure("a photo cannot be empty");
+  }
+  return changePerson(personReference, [&](const Person & person) {
+             Person changed = person;
+             changed.setPhoto(photo);
+             return changed;
+  });
+}
+
+Result<void>
+WorldStateService::setPersonFavoriteDrink(
+  const std::string & personReference,
+  const std::string & drink)
+{
+  return changePerson(personReference, [&](const Person & person) {
+             Person changed = person;
+             changed.setFavoriteDrink(drink);
+             return changed;
+  });
+}
+
+Result<void> WorldStateService::setPersonOrder(
+  const std::string & personReference,
+  const std::vector<std::string> & objectReferences)
+{
+  std::vector<ManipulableObject> objects;
+  for (const std::string & reference : objectReferences) {
+    Result<ManipulableObject> object = resolveObject(reference);
+    if (object.isFailure()) {
+      return Result<void>::failure(object.error());
+    }
+    objects.push_back(std::move(object).value());
+  }
+  return changePerson(personReference, [&](const Person & person) {
+             Person changed = person;
+             changed.setOrder(objects);
+             return changed;
   });
 }
 
@@ -254,8 +674,12 @@ Result<void> WorldStateService::resetRuntimeState()
 // -- Private ---------------------------------------------------------
 
 std::string
-WorldStateService::findOwnershipProblem(const ManipulableObject & object)
+WorldStateService::findObjectProblem(const ManipulableObject & object)
 {
+  const std::string nameIssue = nameProblem(object.getName());
+  if (!nameIssue.empty()) {
+    return nameIssue;
+  }
   const ObjectOwnership ownership = object.getOwnership();
   if (ownership.isAtLocation() &&
     !repository_.loadKnownLocationByName(ownership.getLocationName())
@@ -268,7 +692,64 @@ WorldStateService::findOwnershipProblem(const ManipulableObject & object)
   {
     return "person not found: " + ownership.getPersonName();
   }
+  if (ownership.isHeldByRobot()) {
+    const std::optional<Robot> robot = repository_.loadRobot();
+    if (robot.has_value()) {
+      const std::optional<ManipulableObject> held =
+        robot->getObjectInHand(ownership.getRobotHand());
+      if (held.has_value() && held->getName() != object.getName()) {
+        return "the " + handText(ownership.getRobotHand()) +
+               " hand already holds '" + held->getName() + "'";
+      }
+    }
+  }
   return std::string();
+}
+
+std::string WorldStateService::findPersonProblem(const Person & person)
+{
+  return nameProblem(person.getName());
+}
+
+Result<void> WorldStateService::changeObject(
+  const std::string & reference,
+  const std::function<void(ManipulableObject &)> & change)
+{
+  Result<ManipulableObject> found = resolveObject(reference);
+  if (found.isFailure()) {
+    return Result<void>::failure(found.error());
+  }
+  ManipulableObject object = std::move(found).value();
+  change(object);
+  return createOrUpdateObject(object);
+}
+
+Result<void> WorldStateService::changePerson(
+  const std::string & reference,
+  const std::function<Person(const Person &)> & change)
+{
+  const Result<Person> found = resolvePerson(reference);
+  if (found.isFailure()) {
+    return Result<void>::failure(found.error());
+  }
+  return createOrUpdatePerson(change(found.value()));
+}
+
+Person WorldStateService::rebuiltPerson(
+  const Person & person, PersonType type,
+  const KnownLocation & location)
+{
+  Person rebuilt(person.getName(), type, location);
+  rebuilt.setPhysicalDescription(person.getPhysicalDescription());
+  rebuilt.setFavoriteDrink(person.getFavoriteDrink());
+  rebuilt.setOrder(person.getOrder());
+  if (person.getNavigablePose().has_value()) {
+    rebuilt.setNavigablePose(*person.getNavigablePose());
+  }
+  if (person.getPhoto().has_value()) {
+    rebuilt.setPhoto(*person.getPhoto());
+  }
+  return rebuilt;
 }
 
 } // namespace knowledge_manager::application
